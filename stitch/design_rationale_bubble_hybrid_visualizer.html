@@ -1,0 +1,25 @@
+# Design Rationale: Bubble Hybrid Visualizer ({{DATA:SCREEN:SCREEN_8}})
+
+The "Bubble Hybrid" visualization was designed as a modern, organic alternative to traditional grid-based treemaps. Here is the detailed thinking behind this specific interface:
+
+## 1. Organic Visual Hierarchy (Circle Packing)
+Traditional treemaps (like SpaceSniffer) use rectangles, which are great for density but can feel "mechanically heavy" and rigid.
+*   **Cognitive Load:** By using circular elements (Circle Packing), we create a more organic feel that is easier for the human eye to parse at a glance.
+*   **Proportional Scalability:** The relative size of the bubbles immediately communicates which folders are the "heavy hitters" without the user needing to read specific MB/GB numbers first.
+
+## 2. Spatial Context & Nesting
+*   **Nested Relationship:** The "bubbles within bubbles" metaphor naturally represents the folder hierarchy (e.g., `node_modules` inside a project folder).
+*   **Exploration:** This layout invites exploration. Large bubbles attract attention to problems, while smaller ones recede, helping users focus on what matters most for disk space recovery.
+
+## 3. The "Insight Rail" (Contextual Detail)
+While the bubbles provide the *what* and *how much*, the side panel (Insight Rail) provides the *why* and *who*.
+*   **Immediate Action:** Instead of forcing the user to right-click or go to a different screen, the side panel surfaces critical metadata: oldest files, duplicates within that folder, and top file extensions.
+*   **Clean-up Recommendations:** We integrated "Smart Recommendations" directly into the visual exploration, turning a passive viewing experience into an active cleanup tool.
+
+## 4. Minimalist Aesthetic (Tauri/Rust Alignment)
+*   **Performance Look:** The clean, light-mode UI with subtle shadows and transparency is designed to look like it *runs fast*. This aligns with the performance characteristics of a Rust/Tauri backend.
+*   **Professionalism:** Using a restrained color palette (teals and soft grays) ensures the app feels like a precision tool for power users rather than a cluttered utility.
+
+## 5. Focus on User Confidence
+*   **Current Path:** The breadcrumb navigation at the top ensures the user never feels "lost" inside deep directory structures.
+*   **Clear Call-to-Action:** The "Clean Up Recommendations" button is prominent but not intrusive, maintaining the "Take Action" phase of our three-step flow.

@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Folder Insight | Dashboard Overview</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Inter:wght@300;400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "error-container": "#fe8983",
+                        "surface-container-highest": "#d9e4ea",
+                        "surface-container-high": "#e1e9ee",
+                        "tertiary-dim": "#3e5946",
+                        "on-background": "#2a3439",
+                        "inverse-on-surface": "#9a9d9f",
+                        "primary": "#0053db",
+                        "surface-tint": "#0053db",
+                        "secondary": "#5c605f",
+                        "on-primary": "#f8f7ff",
+                        "on-secondary-fixed": "#3c4040",
+                        "outline": "#717c82",
+                        "inverse-primary": "#618bff",
+                        "on-tertiary-fixed-variant": "#4f6b57",
+                        "secondary-container": "#e0e3e2",
+                        "on-error": "#fff7f6",
+                        "surface-container-lowest": "#ffffff",
+                        "on-surface-variant": "#566166",
+                        "primary-container": "#dbe1ff",
+                        "on-secondary-container": "#4f5252",
+                        "secondary-fixed-dim": "#d2d5d4",
+                        "surface-dim": "#cfdce3",
+                        "on-tertiary": "#e7ffea",
+                        "on-primary-container": "#0048bf",
+                        "primary-dim": "#0048c1",
+                        "secondary-dim": "#505453",
+                        "tertiary-fixed": "#daf9df",
+                        "on-tertiary-container": "#45604d",
+                        "surface": "#f7f9fb",
+                        "on-error-container": "#752121",
+                        "tertiary-container": "#daf9df",
+                        "surface-bright": "#f7f9fb",
+                        "on-secondary-fixed-variant": "#595c5c",
+                        "primary-fixed": "#dbe1ff",
+                        "error-dim": "#4e0309",
+                        "tertiary": "#4a6552",
+                        "surface-container-low": "#f0f4f7",
+                        "error": "#9f403d",
+                        "secondary-fixed": "#e0e3e2",
+                        "inverse-surface": "#0b0f10",
+                        "on-tertiary-fixed": "#334e3b",
+                        "on-secondary": "#f7f9f8",
+                        "primary-fixed-dim": "#c7d3ff",
+                        "surface-variant": "#d9e4ea",
+                        "on-primary-fixed": "#003798",
+                        "tertiary-fixed-dim": "#cbead1",
+                        "surface-container": "#e8eff3",
+                        "on-primary-fixed-variant": "#0050d4",
+                        "outline-variant": "#a9b4b9",
+                        "on-surface": "#2a3439",
+                        "background": "#f7f9fb"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "fontFamily": {
+                        "headline": ["Manrope"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; }
+        .font-manrope { font-family: 'Manrope', sans-serif; }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            display: inline-block;
+            line-height: 1;
+            vertical-align: middle;
+        }
+    </style>
+</head>
+<body class="bg-surface text-on-surface selection:bg-primary-container selection:text-on-primary-container">
+<!-- SideNavBar Anchor -->
+<aside class="h-screen w-64 fixed left-0 top-0 bg-slate-100 dark:bg-slate-900 flex flex-col h-full py-6 px-4 z-50">
+<div class="mb-10 px-2 flex items-center gap-3">
+<div class="w-8 h-8 rounded bg-primary-dim flex items-center justify-center">
+<span class="material-symbols-outlined text-on-primary text-xl" data-icon="folder_managed">folder_managed</span>
+</div>
+<div>
+<h1 class="text-lg font-bold text-teal-800 dark:text-teal-200 font-manrope leading-none">Folder Insight</h1>
+<p class="text-[10px] uppercase tracking-widest text-slate-500 font-bold mt-1">Precision Analysis</p>
+</div>
+</div>
+<nav class="flex-1 space-y-1">
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-teal-700 dark:text-teal-400 font-semibold border-r-2 border-teal-700 dark:border-teal-400 bg-slate-200/50 dark:bg-slate-800/50 font-manrope text-sm tracking-tight transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="visibility">visibility</span>
+                See Clearly
+            </a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-teal-600 dark:hover:text-teal-300 hover:bg-slate-200/50 dark:hover:bg-slate-800/50 font-manrope text-sm tracking-tight transition-colors active:scale-95 duration-150" href="#">
+<span class="material-symbols-outlined" data-icon="report_problem">report_problem</span>
+                Find Problems
+            </a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-teal-600 dark:hover:text-teal-300 hover:bg-slate-200/50 dark:hover:bg-slate-800/50 font-manrope text-sm tracking-tight transition-colors active:scale-95 duration-150" href="#">
+<span class="material-symbols-outlined" data-icon="bolt">bolt</span>
+                Take Action
+            </a>
+</nav>
+<button class="mt-4 mb-8 mx-2 py-3 px-4 rounded-xl bg-gradient-to-br from-primary to-primary-dim text-on-primary font-manrope font-bold text-sm shadow-md hover:opacity-90 transition-opacity flex items-center justify-center gap-2">
+<span class="material-symbols-outlined" data-icon="add">add</span>
+            New Scan
+        </button>
+<div class="pt-6 border-t border-slate-200 dark:border-slate-800 space-y-1">
+<a class="flex items-center gap-3 px-3 py-2 text-slate-500 dark:text-slate-400 hover:text-teal-600 dark:hover:text-teal-300 font-manrope text-sm tracking-tight transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+                Settings
+            </a>
+<a class="flex items-center gap-3 px-3 py-2 text-slate-500 dark:text-slate-400 hover:text-teal-600 dark:hover:text-teal-300 font-manrope text-sm tracking-tight transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="help">help</span>
+                Support
+            </a>
+</div>
+</aside>
+<!-- TopAppBar Anchor -->
+<header class="fixed top-0 right-0 w-[calc(100%-16rem)] h-16 bg-white/80 dark:bg-slate-950/80 backdrop-blur-xl border-b border-slate-200/15 dark:border-slate-800/15 shadow-sm dark:shadow-none z-40 flex items-center justify-between px-8">
+<div class="flex items-center flex-1">
+<div class="relative w-full max-w-md">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-lg" data-icon="search">search</span>
+<input class="w-full bg-surface-container-low border-none rounded-full py-2 pl-10 pr-4 text-sm focus:ring-1 focus:ring-primary placeholder:text-on-surface-variant/50" placeholder="Search files, folders, or insights..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<button class="px-4 py-2 rounded-lg text-on-surface-variant hover:text-primary font-manrope text-sm font-medium transition-opacity active:opacity-80 duration-200">Export</button>
+<button class="px-5 py-2 rounded-lg bg-primary text-on-primary font-manrope text-sm font-medium hover:bg-primary-dim transition-opacity active:opacity-80 duration-200">Run Scan</button>
+<div class="flex items-center gap-2 ml-2 pl-4 border-l border-slate-200/20">
+<button class="p-2 text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+</button>
+<button class="p-2 text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined" data-icon="account_circle">account_circle</span>
+</button>
+</div>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="ml-64 pt-24 px-10 pb-12 min-h-screen">
+<!-- Dashboard Header -->
+<header class="mb-10">
+<h2 class="text-3xl font-extrabold font-manrope text-on-surface tracking-tight mb-2">Dashboard Overview</h2>
+<p class="text-on-surface-variant font-body">Detailed health and storage analysis for <span class="font-semibold text-on-surface">Macintosh HD</span></p>
+</header>
+<!-- Bento Grid Layout -->
+<div class="grid grid-cols-12 gap-6">
+<!-- Disk Usage Analysis (Interactive Chart Style) -->
+<div class="col-span-12 lg:col-span-8 bg-surface-container-lowest rounded-xl p-8 border border-outline-variant/10 shadow-sm">
+<div class="flex items-center justify-between mb-8">
+<div>
+<h3 class="text-lg font-bold font-manrope text-on-surface">Disk Usage Analysis</h3>
+<p class="text-sm text-on-surface-variant">Real-time capacity tracking</p>
+</div>
+<div class="flex gap-2">
+<span class="flex items-center gap-1.5 px-3 py-1 bg-surface-container-high rounded-full text-xs font-semibold text-on-surface">
+<span class="w-2 h-2 rounded-full bg-primary"></span>
+                            Apps
+                        </span>
+<span class="flex items-center gap-1.5 px-3 py-1 bg-surface-container-high rounded-full text-xs font-semibold text-on-surface">
+<span class="w-2 h-2 rounded-full bg-tertiary"></span>
+                            Documents
+                        </span>
+<span class="flex items-center gap-1.5 px-3 py-1 bg-surface-container-high rounded-full text-xs font-semibold text-on-surface">
+<span class="w-2 h-2 rounded-full bg-error-container"></span>
+                            Others
+                        </span>
+</div>
+</div>
+<div class="flex flex-col md:flex-row items-center gap-12">
+<!-- Ring Chart Visualization -->
+<div class="relative w-48 h-48">
+<svg class="w-full h-full -rotate-90" viewbox="0 0 36 36">
+<circle class="text-surface-container-high" cx="18" cy="18" fill="transparent" r="15.915" stroke="var(--tw-surface-container-high)" stroke-width="3"></circle>
+<circle class="text-primary" cx="18" cy="18" fill="transparent" r="15.915" stroke="currentColor" stroke-dasharray="70 100" stroke-linecap="round" stroke-width="3"></circle>
+<circle class="text-tertiary" cx="18" cy="18" fill="transparent" r="15.915" stroke="currentColor" stroke-dasharray="25 100" stroke-dashoffset="-70" stroke-linecap="round" stroke-width="3"></circle>
+</svg>
+<div class="absolute inset-0 flex flex-col items-center justify-center">
+<span class="text-3xl font-bold font-manrope">72%</span>
+<span class="text-[10px] uppercase tracking-widest text-on-surface-variant font-bold">Full</span>
+</div>
+</div>
+<div class="flex-1 space-y-6 w-full">
+<div class="grid grid-cols-2 gap-4">
+<div class="bg-surface-container rounded-lg p-4">
+<p class="text-xs text-on-surface-variant font-medium mb-1">Total Capacity</p>
+<p class="text-xl font-bold font-manrope">1.02 TB</p>
+</div>
+<div class="bg-surface-container rounded-lg p-4">
+<p class="text-xs text-on-surface-variant font-medium mb-1">Available Space</p>
+<p class="text-xl font-bold font-manrope text-primary">284.5 GB</p>
+</div>
+</div>
+<div class="space-y-3">
+<div class="flex justify-between items-end">
+<span class="text-sm font-medium">Scanned Folders Status</span>
+<span class="text-xs text-tertiary font-bold">Optimal</span>
+</div>
+<div class="w-full h-2 bg-surface-container-high rounded-full overflow-hidden">
+<div class="h-full bg-tertiary w-4/5 rounded-full"></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Last Scan Summary -->
+<div class="col-span-12 lg:col-span-4 bg-surface-container rounded-xl p-8 flex flex-col">
+<h3 class="text-lg font-bold font-manrope text-on-surface mb-6">Last Scan</h3>
+<div class="space-y-6 flex-1">
+<div class="flex items-start gap-4">
+<div class="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-primary" data-icon="history">history</span>
+</div>
+<div>
+<p class="text-sm font-bold font-manrope">Completed 2h ago</p>
+<p class="text-xs text-on-surface-variant mt-0.5">Deep system scan (14.2 GB cleared)</p>
+</div>
+</div>
+<div class="bg-surface-container-lowest/50 rounded-xl p-4 space-y-4">
+<div class="flex justify-between items-center">
+<span class="text-xs text-on-surface-variant font-medium">Folders Scanned</span>
+<span class="text-sm font-bold">1,248</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="text-xs text-on-surface-variant font-medium">Potential Issues</span>
+<span class="text-sm font-bold text-error">12</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="text-xs text-on-surface-variant font-medium">Time Elapsed</span>
+<span class="text-sm font-bold">4m 12s</span>
+</div>
+</div>
+</div>
+<button class="w-full py-3 rounded-lg border border-primary/20 text-primary font-manrope font-bold text-sm hover:bg-primary/5 transition-colors mt-6">
+                    View Full Report
+                </button>
+</div>
+<!-- Drag & Drop Area -->
+<div class="col-span-12 lg:col-span-12">
+<div class="relative group cursor-pointer">
+<div class="absolute inset-0 bg-primary/5 rounded-2xl border-2 border-dashed border-primary/30 group-hover:bg-primary/10 transition-all duration-300"></div>
+<div class="relative py-16 flex flex-col items-center justify-center text-center">
+<div class="w-16 h-16 rounded-2xl bg-surface-container-lowest flex items-center justify-center mb-4 shadow-sm group-hover:scale-110 transition-transform duration-300">
+<span class="material-symbols-outlined text-primary text-3xl" data-icon="upload_file">upload_file</span>
+</div>
+<h4 class="text-xl font-bold font-manrope text-on-surface mb-2">Select a folder to analyze</h4>
+<p class="text-on-surface-variant text-sm max-w-sm">Drag and drop any directory here or click to browse. We'll find duplicates, heavy files, and optimization opportunities.</p>
+<div class="mt-8 flex gap-3">
+<button class="px-6 py-2.5 rounded-full bg-primary text-on-primary font-manrope font-bold text-sm shadow-md transition-all active:scale-95">Browse Files</button>
+<button class="px-6 py-2.5 rounded-full bg-surface-container-lowest text-on-surface-variant font-manrope font-bold text-sm border border-outline-variant/30 transition-all hover:bg-white active:scale-95">Scan Cloud</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Quick Action Insights -->
+<div class="col-span-12 md:col-span-6 lg:col-span-4 bg-surface-container-lowest p-6 rounded-xl border border-outline-variant/10">
+<div class="flex items-center gap-3 mb-4">
+<span class="material-symbols-outlined text-tertiary" data-icon="auto_awesome">auto_awesome</span>
+<h5 class="font-bold font-manrope">Smart Cleanup</h5>
+</div>
+<p class="text-sm text-on-surface-variant mb-6">Found 4.2 GB of temporary log files that haven't been accessed in 3 months.</p>
+<div class="flex items-center justify-between">
+<img alt="System storage" class="w-10 h-10 rounded-full border-2 border-surface" data-alt="close-up of digital storage drive hardware with futuristic blue neon lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDBy9-W4G92cMkX3Xn1PWkm6KG-bkj9VFU3x-kaXSzuOiArgvtc0koaCPsegoX7AJDY5KG36k7mxSl95JDqkUaUcs5Cvnv1pFH5rCJI2tQi5_mV777M7tRlKYEZ5DSnQCPk5d3a8E85_7szvxXOvk-PsYmHDqpM-aUy893RhtITF1ieYE6OhhJkRSwS-aC6l9YPH5T9EkHA-33Wp9ijAjGJ_VemN6U42BeyPM8gxm1Qt9Up4MPDLg9DsK3br479LKvZ0LNGhpha5bQ"/>
+<button class="text-sm font-bold text-primary hover:underline">Clean Now</button>
+</div>
+</div>
+<div class="col-span-12 md:col-span-6 lg:col-span-4 bg-surface-container-lowest p-6 rounded-xl border border-outline-variant/10">
+<div class="flex items-center gap-3 mb-4">
+<span class="material-symbols-outlined text-primary-dim" data-icon="file_copy">file_copy</span>
+<h5 class="font-bold font-manrope">Duplicate Finder</h5>
+</div>
+<p class="text-sm text-on-surface-variant mb-6">High probability of 124 duplicate assets in your "Projects/2023" folder.</p>
+<div class="flex items-center justify-between">
+<div class="flex -space-x-2">
+<div class="w-8 h-8 rounded bg-surface-container-high flex items-center justify-center border-2 border-surface text-[10px] font-bold">PDF</div>
+<div class="w-8 h-8 rounded bg-surface-container-high flex items-center justify-center border-2 border-surface text-[10px] font-bold">JPG</div>
+</div>
+<button class="text-sm font-bold text-primary hover:underline">Review</button>
+</div>
+</div>
+<div class="col-span-12 md:col-span-6 lg:col-span-4 bg-surface-container-lowest p-6 rounded-xl border border-outline-variant/10">
+<div class="flex items-center gap-3 mb-4">
+<span class="material-symbols-outlined text-error" data-icon="warning">warning</span>
+<h5 class="font-bold font-manrope">Security Risk</h5>
+</div>
+<p class="text-sm text-on-surface-variant mb-6">3 folders have global write permissions. This could lead to unauthorized access.</p>
+<div class="flex items-center justify-between">
+<div class="px-2 py-1 bg-error-container/20 rounded text-[10px] font-extrabold text-error-dim tracking-tighter">PERMISSION: 777</div>
+<button class="text-sm font-bold text-primary hover:underline">Fix All</button>
+</div>
+</div>
+</div>
+</main>
+<!-- Contextual FAB - Suppression Logic: Hidden as it's a Dashboard -->
+<!-- Suppression logic applied based on UX goal: Dashboard focus priorities shell buttons over floating ones -->
+</body></html>

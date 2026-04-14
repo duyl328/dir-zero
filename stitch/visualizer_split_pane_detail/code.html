@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Folder Insight - Visualizer</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+                  "secondary": "#5c605f",
+                  "error": "#9f403d",
+                  "tertiary": "#4a6552",
+                  "tertiary-dim": "#3e5946",
+                  "on-primary-container": "#0048bf",
+                  "surface-container-lowest": "#ffffff",
+                  "on-surface": "#2a3439",
+                  "surface-bright": "#f7f9fb",
+                  "primary-fixed": "#dbe1ff",
+                  "on-primary-fixed": "#003798",
+                  "tertiary-fixed": "#daf9df",
+                  "surface": "#f7f9fb",
+                  "on-secondary-fixed": "#3c4040",
+                  "tertiary-container": "#daf9df",
+                  "error-dim": "#4e0309",
+                  "secondary-fixed-dim": "#d2d5d4",
+                  "on-primary": "#f8f7ff",
+                  "on-error-container": "#752121",
+                  "secondary-dim": "#505453",
+                  "outline-variant": "#a9b4b9",
+                  "on-secondary": "#f7f9f8",
+                  "error-container": "#fe8983",
+                  "on-secondary-fixed-variant": "#595c5c",
+                  "on-error": "#fff7f6",
+                  "surface-tint": "#0053db",
+                  "secondary-fixed": "#e0e3e2",
+                  "outline": "#717c82",
+                  "on-tertiary": "#e7ffea",
+                  "on-tertiary-fixed-variant": "#4f6b57",
+                  "surface-dim": "#cfdce3",
+                  "on-primary-fixed-variant": "#0050d4",
+                  "on-secondary-container": "#4f5252",
+                  "secondary-container": "#e0e3e2",
+                  "background": "#f7f9fb",
+                  "on-surface-variant": "#566166",
+                  "on-tertiary-fixed": "#334e3b",
+                  "tertiary-fixed-dim": "#cbead1",
+                  "surface-variant": "#d9e4ea",
+                  "surface-container": "#e8eff3",
+                  "primary-dim": "#0048c1",
+                  "surface-container-low": "#f0f4f7",
+                  "on-background": "#2a3439",
+                  "surface-container-high": "#e1e9ee",
+                  "primary-container": "#dbe1ff",
+                  "primary": "#0053db",
+                  "inverse-surface": "#0b0f10",
+                  "inverse-primary": "#618bff",
+                  "inverse-on-surface": "#9a9d9f",
+                  "surface-container-highest": "#d9e4ea",
+                  "primary-fixed-dim": "#c7d3ff",
+                  "on-tertiary-container": "#45604d"
+          },
+          "borderRadius": {
+                  "DEFAULT": "0.125rem",
+                  "lg": "0.25rem",
+                  "xl": "0.5rem",
+                  "full": "0.75rem"
+          },
+          "fontFamily": {
+                  "headline": [
+                          "Manrope"
+                  ],
+                  "body": [
+                          "Inter"
+                  ],
+                  "label": [
+                          "Inter"
+                  ]
+          }
+        },
+      },
+    }
+  </script>
+<style>
+    body { font-family: 'Inter', sans-serif; }
+    h1, h2, h3, .font-headline { font-family: 'Manrope', sans-serif; }
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    }
+    .treemap-node { transition: transform 0.2s ease, filter 0.2s ease; }
+    .treemap-node:hover { transform: scale(1.005); filter: brightness(1.05); cursor: pointer; }
+    .glass-effect { backdrop-filter: blur(12px); background: rgba(247, 249, 251, 0.8); }
+  </style>
+</head>
+<body class="bg-surface text-on-surface flex h-screen overflow-hidden">
+<!-- SideNavBar -->
+<aside class="flex flex-col h-full border-r border-slate-200 dark:border-slate-800 p-4 bg-slate-100 dark:bg-slate-950 h-screen w-64 docked left-0 font-manrope text-sm font-medium">
+<div class="flex items-center gap-3 mb-8 px-2">
+<div class="w-8 h-8 rounded bg-primary flex items-center justify-center text-on-primary">
+<span class="material-symbols-outlined text-sm" style="font-variation-settings: 'FILL' 1;">folder_managed</span>
+</div>
+<div>
+<h1 class="text-lg font-black text-slate-800 dark:text-slate-100 tracking-tighter leading-none">Folder Insight</h1>
+<span class="text-[10px] text-on-surface-variant uppercase tracking-widest">v1.0.4</span>
+</div>
+</div>
+<nav class="flex-1 space-y-1">
+<a class="flex items-center gap-3 px-3 py-2.5 transition-all text-cyan-700 dark:text-cyan-400 bg-white dark:bg-slate-900 rounded-lg shadow-sm" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="grid_view">grid_view</span>
+<span>Visualizer</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 transition-all text-slate-500 dark:text-slate-400 hover:text-slate-700 hover:bg-slate-200 dark:hover:bg-slate-800" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="list_alt">list_alt</span>
+<span>File List</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 transition-all text-slate-500 dark:text-slate-400 hover:text-slate-700 hover:bg-slate-200 dark:hover:bg-slate-800" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="analytics">analytics</span>
+<span>Analytics</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 transition-all text-slate-500 dark:text-slate-400 hover:text-slate-700 hover:bg-slate-200 dark:hover:bg-slate-800" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="history">history</span>
+<span>History</span>
+</a>
+</nav>
+<div class="mt-auto pt-6 space-y-1">
+<button class="w-full mb-4 py-2.5 bg-gradient-to-br from-primary to-primary-dim text-on-primary rounded-lg font-semibold shadow-md active:scale-95 transition-transform flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-sm">add</span>
+        New Scan
+      </button>
+<a class="flex items-center gap-3 px-3 py-2.5 transition-all text-slate-500 dark:text-slate-400 hover:text-slate-700 hover:bg-slate-200 dark:hover:bg-slate-800" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="help">help</span>
+<span>Help</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 transition-all text-slate-500 dark:text-slate-400 hover:text-slate-700 hover:bg-slate-200 dark:hover:bg-slate-800" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="logout">logout</span>
+<span>Logout</span>
+</a>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col min-w-0 bg-surface">
+<!-- TopNavBar -->
+<header class="flex items-center justify-between px-6 py-3 w-full h-16 bg-slate-50 dark:bg-slate-900 border-b-0 font-manrope antialiased tracking-tight">
+<div class="flex items-center gap-4 flex-1">
+<div class="relative w-full max-w-md">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-lg">search</span>
+<input class="w-full pl-10 pr-4 py-1.5 bg-surface-container-low border-none rounded-lg text-sm focus:ring-2 focus:ring-primary/20 placeholder:text-on-surface-variant/60" placeholder="Search directories..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-4">
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 p-1.5 rounded transition-colors" data-icon="filter_list">filter_list</span>
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 p-1.5 rounded transition-colors" data-icon="zoom_in">zoom_in</span>
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 p-1.5 rounded transition-colors" data-icon="settings">settings</span>
+</div>
+<button class="px-4 py-1.5 bg-primary-container text-on-primary-container rounded-lg font-semibold text-sm cursor-pointer active:scale-95 transition-all duration-200">
+          Scan Directory
+        </button>
+</div>
+</header>
+<!-- Split Pane Insight Container -->
+<section class="flex-1 flex overflow-hidden">
+<!-- Left: Treemap Visualization (60%) -->
+<div class="w-[60%] h-full p-6 flex flex-col gap-4">
+<div class="flex items-center justify-between">
+<div>
+<h2 class="headline-sm font-bold text-on-surface tracking-tight">System Drive (C:)</h2>
+<p class="text-xs text-on-surface-variant font-medium uppercase tracking-wider">Storage Distribution</p>
+</div>
+<div class="flex gap-2 bg-surface-container p-1 rounded-lg">
+<button class="px-3 py-1 bg-surface-container-lowest text-xs font-semibold rounded shadow-sm text-primary">Map</button>
+<button class="px-3 py-1 text-xs font-medium rounded text-on-surface-variant">Sunburst</button>
+</div>
+</div>
+<!-- Treemap Canvas -->
+<div class="flex-1 grid grid-cols-12 grid-rows-6 gap-2">
+<!-- Main Work Folder -->
+<div class="col-span-7 row-span-4 bg-primary-fixed rounded-xl p-4 flex flex-col justify-between treemap-node border border-primary/10">
+<div class="flex justify-between items-start">
+<span class="text-on-primary-fixed font-bold text-sm">Work_Assets</span>
+<span class="material-symbols-outlined text-on-primary-fixed-variant text-lg">folder</span>
+</div>
+<div class="text-on-primary-fixed">
+<div class="text-xl font-extrabold tracking-tighter leading-none">142.4 GB</div>
+<div class="text-[10px] opacity-70 font-semibold uppercase tracking-widest mt-1">4,291 Files</div>
+</div>
+</div>
+<!-- Library Folder -->
+<div class="col-span-5 row-span-3 bg-surface-container-highest rounded-xl p-4 flex flex-col justify-between treemap-node border border-outline-variant/10">
+<div class="flex justify-between items-start">
+<span class="text-on-surface font-bold text-sm">Library</span>
+<span class="material-symbols-outlined text-on-surface-variant text-lg">collections</span>
+</div>
+<div class="text-on-surface">
+<div class="text-lg font-extrabold tracking-tighter leading-none">88.2 GB</div>
+<div class="text-[10px] text-on-surface-variant font-semibold uppercase mt-1">Videos &amp; Photos</div>
+</div>
+</div>
+<!-- Applications -->
+<div class="col-span-5 row-span-3 bg-tertiary-fixed rounded-xl p-4 flex flex-col justify-between treemap-node border border-tertiary/10">
+<div class="flex justify-between items-start">
+<span class="text-on-tertiary-fixed font-bold text-sm">Applications</span>
+<span class="material-symbols-outlined text-on-tertiary-fixed-variant text-lg">apps</span>
+</div>
+<div class="text-on-tertiary-fixed">
+<div class="text-lg font-extrabold tracking-tighter leading-none">64.0 GB</div>
+<div class="text-[10px] text-on-tertiary-fixed-variant font-semibold uppercase mt-1">System &amp; User</div>
+</div>
+</div>
+<!-- Temp Files (Active Selection Mock) -->
+<div class="col-span-4 row-span-2 bg-white rounded-xl p-4 flex flex-col justify-between treemap-node border-2 border-primary shadow-lg ring-4 ring-primary/5">
+<div class="flex justify-between items-start">
+<span class="text-primary font-bold text-sm">temp_render_cache</span>
+<span class="material-symbols-outlined text-primary text-lg" style="font-variation-settings: 'FILL' 1;">delete_sweep</span>
+</div>
+<div class="text-on-surface">
+<div class="text-lg font-extrabold tracking-tighter leading-none">42.8 GB</div>
+<div class="text-[10px] text-on-surface-variant font-semibold uppercase mt-1">Selected Node</div>
+</div>
+</div>
+<!-- Smaller items bento fill -->
+<div class="col-span-3 row-span-2 bg-surface-container rounded-xl p-3 treemap-node border border-outline-variant/10">
+<span class="text-on-surface-variant font-bold text-[10px] uppercase">Downloads</span>
+<div class="text-sm font-extrabold mt-1">12.5 GB</div>
+</div>
+</div>
+</div>
+<!-- Right: Selection Detail Panel (40%) -->
+<div class="w-[40%] h-full bg-surface-container-low border-l border-outline-variant/20 flex flex-col overflow-y-auto">
+<div class="p-8 flex-1 flex flex-col">
+<div class="mb-8">
+<div class="w-16 h-16 bg-white rounded-2xl flex items-center justify-center shadow-sm mb-4">
+<span class="material-symbols-outlined text-3xl text-primary" style="font-variation-settings: 'FILL' 1;">folder_zip</span>
+</div>
+<h3 class="text-2xl font-extrabold tracking-tight text-on-surface leading-tight">temp_render_cache</h3>
+<p class="text-sm text-on-surface-variant font-medium mt-1 truncate">/Users/admin/Work_Assets/Projects/2024/temp_render_cache</p>
+</div>
+<div class="space-y-6">
+<!-- Metadata Cards -->
+<div class="grid grid-cols-2 gap-4">
+<div class="bg-surface-container-lowest p-4 rounded-xl shadow-sm border border-outline-variant/10">
+<p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-1">Total Size</p>
+<p class="text-xl font-extrabold text-on-surface">42.8 GB</p>
+</div>
+<div class="bg-surface-container-lowest p-4 rounded-xl shadow-sm border border-outline-variant/10">
+<p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-1">File Count</p>
+<p class="text-xl font-extrabold text-on-surface">1,842</p>
+</div>
+</div>
+<div class="space-y-4">
+<div class="flex items-center justify-between py-3 border-b border-outline-variant/10">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-on-surface-variant">calendar_today</span>
+<span class="text-sm font-medium text-on-surface-variant">Date Modified</span>
+</div>
+<span class="text-sm font-semibold text-on-surface">Oct 24, 2023</span>
+</div>
+<div class="flex items-center justify-between py-3 border-b border-outline-variant/10">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-on-surface-variant">history</span>
+<span class="text-sm font-medium text-on-surface-variant">Last Accessed</span>
+</div>
+<span class="text-sm font-semibold text-on-surface">2 hours ago</span>
+</div>
+<div class="flex items-center justify-between py-3">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-on-surface-variant">info</span>
+<span class="text-sm font-medium text-on-surface-variant">Potential Saving</span>
+</div>
+<span class="text-sm font-bold text-tertiary">92%</span>
+</div>
+</div>
+<!-- Health/Clean Indicator -->
+<div class="bg-surface-container p-5 rounded-2xl">
+<div class="flex justify-between items-center mb-2">
+<span class="text-xs font-bold uppercase tracking-wider text-on-surface">Redundancy Check</span>
+<span class="text-xs font-bold text-error">High Waste</span>
+</div>
+<div class="w-full h-2 bg-outline-variant/30 rounded-full overflow-hidden">
+<div class="h-full bg-error-container w-[85%] rounded-full"></div>
+</div>
+<p class="text-[11px] text-on-surface-variant mt-3 leading-relaxed">
+                This folder contains temporary rendering cache files from multiple completed projects. None have been accessed in over 90 days.
+              </p>
+</div>
+</div>
+<div class="mt-auto pt-8">
+<button class="w-full py-4 bg-gradient-to-br from-primary to-primary-dim text-on-primary rounded-xl font-bold text-lg shadow-lg shadow-primary/20 active:scale-[0.98] transition-all flex items-center justify-center gap-3">
+<span class="material-symbols-outlined">auto_delete</span>
+              Clean Up 42.8 GB
+            </button>
+<p class="text-center text-[11px] text-on-surface-variant mt-3 px-4">
+              Action cannot be undone. Files will be moved to the system bin.
+            </p>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- Contextual FAB (Suppressed on Detail Screen per rule, but included here for "See Clearly" Home context) -->
+<!-- Suppression logic applied: This is a Detail/Selection screen, FAB is hidden. -->
+</body></html>
