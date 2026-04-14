@@ -63,6 +63,11 @@ export type FileTypeCategory =
   | "installer"
   | "code"
   | "database"
+  | "design"
+  | "model"
+  | "font"
+  | "disk_image"
+  | "system"
   | "cache"
   | "unknown";
 

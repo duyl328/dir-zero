@@ -3,8 +3,8 @@ import TreemapCanvas from "../components/overview/TreemapCanvas";
 import DirectoryTree from "../components/overview/DirectoryTree";
 import DetailPanel from "../components/overview/DetailPanel";
 import InsightPanel from "../components/overview/InsightPanel";
-import { useState, useEffect } from "react";
-import type { FolderEntry, FolderChild } from "../types";
+import { useState, useEffect, useRef, useMemo } from "react";
+import type { FolderEntry, FolderChild, FileEntry } from "../types";
 
 function formatBytes(b: number) {
   if (b < 1e6) return `${(b / 1e3).toFixed(0)} KB`;
@@ -24,6 +24,15 @@ function findPathToFolder(node: FolderEntry, targetPath: string): FolderEntry[] 
   return null;
 }
 
+// Recursively collect all file entries from the tree
+function collectFiles(node: FolderEntry, out: FileEntry[] = []): FileEntry[] {
+  for (const child of node.children) {
+    if (child.kind === "file") out.push(child);
+    else collectFiles(child, out);
+  }
+  return out;
+}
+
 type ColorMode = "type" | "age";
 
 export default function OverviewPage() {
@@ -31,6 +40,23 @@ export default function OverviewPage() {
   const result = session.result;
   const [colorMode, setColorMode] = useState<ColorMode>("type");
   const [selected, setSelected] = useState<FolderChild | null>(null);
+  const [leftWidth, setLeftWidth] = useState(224);
+  const isDragging = useRef(false);
+  const dragStartX = useRef(0);
+  const dragStartW = useRef(0);
+
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      if (!isDragging.current) return;
+      const delta = e.clientX - dragStartX.current;
+      setLeftWidth(Math.max(140, Math.min(400, dragStartW.current + delta)));
+    }
+    function onUp() { isDragging.current = false; }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+  }, []);
+
   // Treemap drill-down stack — lifted here so tree and treemap stay in sync
   const [treemapStack, setTreemapStack] = useState<FolderEntry[]>(result ? [result.tree] : []);
 
@@ -41,6 +67,60 @@ export default function OverviewPage() {
       setSelected(null);
     }
   }, [result]);
+
+  // Compute real file stats from the tree
+  const allFiles = useMemo(() => result ? collectFiles(result.tree) : [], [result]);
+
+  const typeStats = useMemo(() => {
+    if (!allFiles.length) return [];
+    const totals: Record<string, number> = {};
+    let total = 0;
+    for (const f of allFiles) {
+      totals[f.fileType] = (totals[f.fileType] ?? 0) + f.size;
+      total += f.size;
+    }
+    const TYPE_META: Record<string, { label: string; color: string }> = {
+      video:      { label: "Videos",     color: "#06b6d4" },
+      installer:  { label: "Apps",       color: "#6366f1" },
+      document:   { label: "Docs",       color: "#94a3b8" },
+      image:      { label: "Images",     color: "#f59e0b" },
+      code:       { label: "Code",       color: "#10b981" },
+      archive:    { label: "Archives",   color: "#8b5cf6" },
+      audio:      { label: "Audio",      color: "#ec4899" },
+      database:   { label: "Database",   color: "#f97316" },
+      design:     { label: "Design",     color: "#e879f9" },
+      model:      { label: "3D/Game",    color: "#34d399" },
+      font:       { label: "Fonts",      color: "#a78bfa" },
+      disk_image: { label: "Disk Img",   color: "#fb7185" },
+      system:     { label: "System",     color: "#64748b" },
+      cache:      { label: "Cache",      color: "#6b7280" },
+      unknown:    { label: "Unknown",    color: "#a9b4b9" },
+    };
+    return Object.entries(totals)
+      .filter(([, sz]) => sz > 0)
+      .sort(([, a], [, b]) => b - a)
+      .map(([type, sz]) => ({
+        type,
+        label: TYPE_META[type]?.label ?? type,
+        color: TYPE_META[type]?.color ?? "#a9b4b9",
+        pct: total > 0 ? ((sz / total) * 100).toFixed(1) + "%" : "0%",
+        pctNum: total > 0 ? (sz / total) * 100 : 0,
+        size: sz,
+      }));
+  }, [allFiles]);
+
+  // Per-extension breakdown for unknown files
+  const unknownExtStats = useMemo(() => {
+    const extTotals: Record<string, number> = {};
+    let total = 0;
+    for (const f of allFiles) {
+      if (f.fileType !== "unknown") continue;
+      const ext = f.ext ? `.${f.ext.toLowerCase()}` : "(no ext)";
+      extTotals[ext] = (extTotals[ext] ?? 0) + f.size;
+      total += f.size;
+    }
+    return { total, exts: Object.entries(extTotals).sort(([, a], [, b]) => b - a).slice(0, 8) };
+  }, [allFiles]);
 
   // Called when user clicks a node in the directory tree
   function handleTreeSelect(child: FolderChild) {
@@ -94,6 +174,15 @@ export default function OverviewPage() {
             <span className="text-xs font-bold text-error">{result.issueCount} issues found</span>
           </div>
         )}
+        {/* Rescan button */}
+        <button
+          onClick={() => setScanStatus("configuring")}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant hover:text-primary transition-all text-xs font-bold"
+          title="重新扫描"
+        >
+          <span className="material-symbols-outlined text-[16px]">refresh</span>
+          重新扫描
+        </button>
         <div className="flex items-center gap-1 bg-surface-container-high rounded-lg p-1">
           {(["type", "age"] as ColorMode[]).map((m) => (
             <button
@@ -115,7 +204,7 @@ export default function OverviewPage() {
       {/* Main area */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left: directory tree */}
-        <div className="w-56 shrink-0 border-r border-outline-variant/10 overflow-y-auto bg-surface-container-low/40">
+        <div style={{ width: leftWidth }} className="shrink-0 overflow-y-auto bg-surface-container-low/40">
           <DirectoryTree
             root={result.tree}
             onSelect={handleTreeSelect}
@@ -124,6 +213,12 @@ export default function OverviewPage() {
             onNavigateToRoot={() => { setTreemapStack([result.tree]); setSelected(null); }}
           />
         </div>
+
+        {/* Drag handle */}
+        <div
+          onMouseDown={(e) => { isDragging.current = true; dragStartX.current = e.clientX; dragStartW.current = leftWidth; e.preventDefault(); }}
+          className="w-1 shrink-0 cursor-col-resize bg-outline-variant/10 hover:bg-primary/40 transition-colors"
+        />
 
         {/* Center: treemap */}
         <div className="flex-1 flex flex-col overflow-hidden">
@@ -135,13 +230,13 @@ export default function OverviewPage() {
             stack={treemapStack}
             onStackChange={setTreemapStack}
           />
-          <TypeBar />
+          <TypeBar stats={typeStats} unknownExts={unknownExtStats} />
         </div>
 
         {/* Right: detail + insight */}
         <div className="w-72 shrink-0 border-l border-outline-variant/10 flex flex-col overflow-hidden">
           <DetailPanel node={selected} />
-          <InsightPanel issueCount={result.issueCount} />
+          <InsightPanel allFiles={allFiles} totalSize={result.totalSize} />
         </div>
       </div>
     </div>
@@ -158,26 +253,55 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
   );
 }
 
-const TYPE_COLORS: [string, string, string][] = [
-  ["Videos", "#06b6d4", "22%"],
-  ["Apps", "#6366f1", "19%"],
-  ["Documents", "#94a3b8", "12%"],
-  ["Images", "#f59e0b", "18%"],
-  ["Code", "#10b981", "9%"],
-  ["Archives", "#8b5cf6", "7%"],
-  ["Other", "#a9b4b9", "13%"],
-];
+interface TypeBarStat { type: string; label: string; color: string; pct: string; pctNum: number; size: number }
+interface UnknownExtStats { total: number; exts: [string, number][] }
 
-function TypeBar() {
+// Unknown is "large" if it contributes more than this share
+const UNKNOWN_EXPAND_THRESHOLD = 15; // percent
+
+function TypeBar({ stats, unknownExts }: { stats: TypeBarStat[]; unknownExts: UnknownExtStats }) {
+  if (!stats.length) return null;
+  const unknownStat = stats.find((s) => s.type === "unknown");
+  const showUnknownDetail = (unknownStat?.pctNum ?? 0) >= UNKNOWN_EXPAND_THRESHOLD && unknownExts.exts.length > 0;
+
   return (
-    <div className="h-10 bg-surface-container-highest px-4 flex items-center gap-4 shrink-0 border-t border-outline-variant/10">
-      {TYPE_COLORS.map(([label, color, pct]) => (
-        <button key={label} className="flex items-center gap-1.5 hover:opacity-80 transition-opacity">
-          <span className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
-          <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-tight">{label}</span>
-          <span className="text-[10px] text-on-surface-variant/60">{pct}</span>
-        </button>
-      ))}
+    <div className="bg-surface-container-highest border-t border-outline-variant/10 shrink-0">
+      {/* Proportional colour bar */}
+      <div className="flex h-1.5">
+        {stats.map((s) => (
+          <div key={s.type} style={{ flex: s.size, background: s.color }} title={`${s.label} ${s.pct}`} />
+        ))}
+      </div>
+
+      {/* Legend row */}
+      <div className="px-4 py-2 flex items-center gap-4 flex-wrap">
+        {stats.map((s) => (
+          <div key={s.type} className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: s.color }} />
+            <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-tight">{s.label}</span>
+            <span className="text-[10px] text-on-surface-variant/60">{s.pct}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Unknown breakdown — only shown when unknown is a large slice */}
+      {showUnknownDetail && (
+        <div className="px-4 pb-2.5 flex items-center gap-1 flex-wrap border-t border-outline-variant/10 pt-2">
+          <span className="text-[9px] font-bold uppercase tracking-widest text-on-surface-variant/50 mr-1">Unknown 细分：</span>
+          {unknownExts.exts.map(([ext, sz]) => {
+            const pct = unknownExts.total > 0 ? ((sz / unknownExts.total) * 100).toFixed(0) : "0";
+            return (
+              <div key={ext} className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-container-high">
+                <span className="text-[10px] font-mono font-bold text-on-surface-variant">{ext}</span>
+                <span className="text-[9px] text-on-surface-variant/50">{pct}%</span>
+              </div>
+            );
+          })}
+          {unknownExts.exts.length === 8 && (
+            <span className="text-[9px] text-on-surface-variant/40">…</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

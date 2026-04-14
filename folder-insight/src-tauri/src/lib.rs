@@ -81,15 +81,74 @@ fn unix_ms(t: SystemTime) -> u64 {
 
 fn classify_ext(ext: &str) -> &'static str {
     match ext.to_lowercase().as_str() {
-        "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" | "svg" | "ico" | "tiff" | "heic" => "image",
-        "mp4" | "mkv" | "avi" | "mov" | "wmv" | "flv" | "webm" | "m4v" | "mpg" | "mpeg" => "video",
-        "mp3" | "flac" | "wav" | "aac" | "ogg" | "m4a" | "wma" | "opus" => "audio",
-        "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "txt" | "md" | "rtf" | "odt" => "document",
-        "zip" | "rar" | "7z" | "tar" | "gz" | "bz2" | "xz" | "zst" => "archive",
-        "exe" | "msi" | "dmg" | "pkg" | "deb" | "rpm" | "appimage" => "installer",
-        "rs" | "py" | "js" | "ts" | "tsx" | "jsx" | "go" | "java" | "c" | "cpp" | "h" | "cs" | "rb" | "php" | "swift" | "kt" => "code",
-        "db" | "sqlite" | "sqlite3" | "mdb" | "accdb" => "database",
-        "cache" | "tmp" | "temp" | "log" => "cache",
+        // Images
+        "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" | "svg" | "ico" | "tiff" | "tif"
+        | "heic" | "heif" | "avif" | "jxl" | "raw" | "cr2" | "cr3" | "nef" | "arw"
+        | "dng" | "orf" | "rw2" | "ppm" | "pgm" | "pbm" | "exr" | "hdr" => "image",
+
+        // Video
+        "mp4" | "mkv" | "avi" | "mov" | "wmv" | "flv" | "webm" | "m4v" | "mpg" | "mpeg"
+        | "mts" | "m2ts" | "vob" | "3gp" | "3g2" | "rmvb" | "rm" | "ogv"
+        | "divx" | "xvid" => "video",
+
+        // Audio
+        "mp3" | "flac" | "wav" | "aac" | "ogg" | "m4a" | "wma" | "opus" | "ape" | "alac"
+        | "aiff" | "aif" | "mid" | "midi" | "mka" | "ra" | "amr" => "audio",
+
+        // Documents
+        "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "txt" | "md" | "rtf"
+        | "odt" | "ods" | "odp" | "pages" | "numbers" | "key" | "epub" | "mobi" | "azw"
+        | "azw3" | "djvu" | "tex" | "rst" | "org" | "nfo" | "csv" | "tsv" => "document",
+
+        // Archives
+        "zip" | "rar" | "7z" | "tar" | "gz" | "bz2" | "xz" | "zst" | "lz4" | "lzma"
+        | "cab" | "iso" | "img" | "dmg" | "pkg" | "z" | "lzh" | "arj" | "ace"
+        | "tar.gz" | "tar.bz2" | "tar.xz" | "tar.zst" => "archive",
+
+        // Installers / executables
+        "exe" | "msi" | "msix" | "appx" | "deb" | "rpm" | "appimage" | "flatpak" | "snap"
+        | "apk" | "ipa" | "xap" | "crx" => "installer",
+
+        // Code & config
+        "rs" | "py" | "js" | "ts" | "tsx" | "jsx" | "go" | "java" | "c" | "cpp" | "cc"
+        | "cxx" | "h" | "hpp" | "cs" | "rb" | "php" | "swift" | "kt" | "kts" | "scala"
+        | "clj" | "cljs" | "elm" | "ex" | "exs" | "erl" | "hrl" | "hs" | "lhs" | "lua"
+        | "pl" | "pm" | "r" | "jl" | "nim" | "zig" | "v" | "dart" | "groovy" | "gradle"
+        | "sh" | "bash" | "zsh" | "fish" | "ps1" | "psm1" | "bat" | "cmd"
+        | "html" | "htm" | "css" | "scss" | "sass" | "less" | "styl"
+        | "json" | "json5" | "yaml" | "yml" | "toml" | "xml" | "ini" | "cfg" | "conf"
+        | "env" | "properties" | "lock" | "sum" | "mod"
+        | "vue" | "svelte" | "astro" | "mdx" => "code",
+
+        // Database
+        "db" | "sqlite" | "sqlite3" | "mdb" | "accdb" | "frm" | "myd" | "myi"
+        | "ibd" | "dbf" | "ndf" | "ldf" | "mdf" => "database",
+
+        // Design & creative
+        "psd" | "psb" | "ai" | "indd" | "idml" | "sketch" | "fig" | "xd" | "afdesign"
+        | "afphoto" | "afpub" | "cdr" | "xcf" | "clip" | "csp" | "procreate"
+        | "blend" | "c4d" | "max" | "maya" | "ma" | "mb" => "design",
+
+        // 3-D models & game assets
+        "glb" | "gltf" | "fbx" | "obj" | "dae" | "stl" | "ply" | "3ds" | "x3d"
+        | "abc" | "usd" | "usda" | "usdc" | "usdz"
+        | "unity" | "prefab" | "asset" | "pak" | "vpk" | "bsp" | "pk3" => "model",
+
+        // Fonts
+        "ttf" | "otf" | "woff" | "woff2" | "eot" | "fon" | "bdf" | "pfb" | "pfm" => "font",
+
+        // Virtual machines & disk images (already in archive but these are big/specific)
+        "vmdk" | "vhd" | "vhdx" | "vdi" | "qcow" | "qcow2" | "ovf" | "ova" => "disk_image",
+
+        // System / binary / unknown-binary
+        "dll" | "so" | "dylib" | "sys" | "drv" | "ocx" | "ax"
+        | "bin" | "hex" | "dat" | "data" | "dump" | "dmp"
+        | "bak" | "old" | "orig" | "swp" | "swo" => "system",
+
+        // Cache / temp
+        "cache" | "tmp" | "temp" | "log" | "part" | "crdownload" | "partial"
+        | "thumbnails" | "ds_store" => "cache",
+
         _ => "unknown",
     }
 }

@@ -97,10 +97,26 @@ function computeAllRects(
 
 // ── Color helpers ─────────────────────────────────────────────────────────────
 
+// Auto-expand folders whose initial rect is large enough to show children meaningfully
+function getAutoExpanded(children: FolderChild[], w: number, h: number): Set<string> {
+  const result = new Set<string>();
+  const rects = squarify(children, 0, 0, w, h);
+  for (const r of rects) {
+    if (r.child.kind !== "folder" || r.child.children.length === 0) continue;
+    const innerW = r.w - PAD * 2;
+    const innerH = r.h - EXPAND_HEADER - PAD;
+    if (innerW >= 110 && innerH >= 70) result.add(r.child.path);
+  }
+  return result;
+}
+
+// ── Color helpers ─────────────────────────────────────────────────────────────
+
 const FILE_TYPE_COLORS: Record<string, string> = {
   image: "#f59e0b", video: "#06b6d4", audio: "#ec4899", document: "#94a3b8",
   archive: "#8b5cf6", installer: "#ef4444", code: "#10b981", database: "#f97316",
-  cache: "#6b7280", unknown: "#a9b4b9",
+  design: "#e879f9", model: "#34d399", font: "#a78bfa", disk_image: "#fb7185",
+  system: "#64748b", cache: "#6b7280", unknown: "#a9b4b9",
 };
 const FOLDER_COLORS = ["#6366f1", "#3b82f6", "#0ea5e9", "#06b6d4", "#14b8a6", "#10b981", "#84cc16", "#eab308"];
 
@@ -124,6 +140,21 @@ function formatBytes(b: number): string {
   return `${(b / 1e9).toFixed(2)} GB`;
 }
 
+// Truncate text with ellipsis instead of letting canvas compress it
+function truncateText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
+  if (maxWidth <= 0) return "";
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  const ellipsisW = ctx.measureText("…").width;
+  if (ellipsisW >= maxWidth) return "";
+  let lo = 0, hi = text.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (ctx.measureText(text.slice(0, mid)).width + ellipsisW <= maxWidth) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo === 0 ? "" : text.slice(0, lo) + "…";
+}
+
 // ── Canvas helpers ────────────────────────────────────────────────────────────
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
@@ -145,14 +176,20 @@ export default function TreemapCanvas({ root, colorMode, selected, onSelect, sta
   const [dims, setDims] = useState({ w: 0, h: 0 });
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; child: FolderChild } | null>(null);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
+  const initializedPathRef = useRef<string | null>(null);
 
   const current = stack[stack.length - 1] ?? root;
 
   // Reset when root changes
   useEffect(() => { onStackChange([root]); }, [root]);
 
-  // Reset expanded when navigating into a new folder
-  useEffect(() => { setExpandedPaths(new Set()); }, [current.path]);
+  // When navigating to a new folder, auto-expand large folders
+  useEffect(() => {
+    if (dims.w === 0 || dims.h === 0) return;
+    if (initializedPathRef.current === current.path) return;
+    initializedPathRef.current = current.path;
+    setExpandedPaths(getAutoExpanded(current.children, dims.w, dims.h));
+  }, [current.path, dims.w, dims.h]);
 
   // Resize observer
   useEffect(() => {
@@ -214,12 +251,14 @@ export default function TreemapCanvas({ root, colorMode, selected, onSelect, sta
 
         // Folder name in header (left-aligned)
         const name = child.name + "/";
+        const headerTextW = w - PAD * 2 - 24;
         ctx.fillStyle = "#ffffff";
         ctx.globalAlpha = 0.95;
         ctx.font = `bold 11px Inter, system-ui, sans-serif`;
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
-        ctx.fillText(name, x + PAD + 6, y + PAD + (EXPAND_HEADER - PAD) / 2, w - PAD * 2 - 24);
+        const tHeaderName = truncateText(ctx, name, headerTextW);
+        if (tHeaderName) ctx.fillText(tHeaderName, x + PAD + 6, y + PAD + (EXPAND_HEADER - PAD) / 2);
         // Collapse indicator
         ctx.font = `12px "Material Symbols Outlined", system-ui, sans-serif`;
         ctx.textAlign = "right";
@@ -247,14 +286,17 @@ export default function TreemapCanvas({ root, colorMode, selected, onSelect, sta
             const sizeY = nameY + fontSize / 2 + gap + sf / 2;
             ctx.font = `bold ${fontSize}px Inter, system-ui, sans-serif`;
             ctx.fillStyle = "#ffffff"; ctx.globalAlpha = 0.95;
-            ctx.fillText(name, cx, nameY, innerW);
+            const tName = truncateText(ctx, name, innerW);
+            if (tName) ctx.fillText(tName, cx, nameY);
             ctx.font = `${sf}px Inter, system-ui, sans-serif`;
             ctx.globalAlpha = 0.65;
-            ctx.fillText(sizeStr, cx, sizeY, innerW);
+            const tSize = truncateText(ctx, sizeStr, innerW);
+            if (tSize) ctx.fillText(tSize, cx, sizeY);
           } else {
             ctx.font = `bold ${fontSize}px Inter, system-ui, sans-serif`;
             ctx.fillStyle = "#ffffff"; ctx.globalAlpha = 0.95;
-            ctx.fillText(name, cx, cy, innerW);
+            const tName = truncateText(ctx, name, innerW);
+            if (tName) ctx.fillText(tName, cx, cy);
           }
           ctx.globalAlpha = 1; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
         }
