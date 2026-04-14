@@ -3,8 +3,11 @@ import TreemapCanvas from "../components/overview/TreemapCanvas";
 import DirectoryTree from "../components/overview/DirectoryTree";
 import DetailPanel from "../components/overview/DetailPanel";
 import InsightPanel from "../components/overview/InsightPanel";
+import SearchBar, { EMPTY_FILTERS, isFiltersActive, compileKeyword } from "../components/overview/SearchBar";
+import SearchResultList from "../components/overview/SearchResultList";
 import { useState, useEffect, useRef, useMemo } from "react";
 import type { FolderEntry, FolderChild, FileEntry } from "../types";
+import type { SearchFilters } from "../components/overview/SearchBar";
 
 function formatBytes(b: number) {
   if (b < 1e6) return `${(b / 1e3).toFixed(0)} KB`;
@@ -33,6 +36,34 @@ function collectFiles(node: FolderEntry, out: FileEntry[] = []): FileEntry[] {
   return out;
 }
 
+const MS_30D = 30 * 24 * 60 * 60 * 1000;
+const MS_1Y = 365 * 24 * 60 * 60 * 1000;
+
+function filterFiles(files: FileEntry[], f: SearchFilters): FileEntry[] {
+  const now = Date.now();
+  const kw = compileKeyword(f);
+  return files.filter((file) => {
+    if (kw !== null) {
+      const hayName = file.name;
+      const hayPath = file.path;
+      if (typeof kw === "string") {
+        const hn = hayName.toLowerCase();
+        const hp = hayPath.toLowerCase();
+        if (!hn.includes(kw) && !hp.includes(kw)) return false;
+      } else {
+        if (!kw.test(hayName) && !kw.test(hayPath)) return false;
+      }
+    }
+    if (f.types.length > 0 && !f.types.includes(file.fileType)) return false;
+    if (f.minSize !== null && file.size < f.minSize) return false;
+    const age = now - file.modifiedAt;
+    if (f.modifiedWithin === "30d" && age > MS_30D) return false;
+    if (f.modifiedWithin === "1y" && age > MS_1Y) return false;
+    if (f.modifiedWithin === "older1y" && age <= MS_1Y) return false;
+    return true;
+  });
+}
+
 type ColorMode = "type" | "age";
 
 export default function OverviewPage() {
@@ -41,6 +72,7 @@ export default function OverviewPage() {
   const [colorMode, setColorMode] = useState<ColorMode>("type");
   const [selected, setSelected] = useState<FolderChild | null>(null);
   const [leftWidth, setLeftWidth] = useState(224);
+  const [filters, setFilters] = useState<SearchFilters>(EMPTY_FILTERS);
   const isDragging = useRef(false);
   const dragStartX = useRef(0);
   const dragStartW = useRef(0);
@@ -70,6 +102,18 @@ export default function OverviewPage() {
 
   // Compute real file stats from the tree
   const allFiles = useMemo(() => result ? collectFiles(result.tree) : [], [result]);
+
+  // Search / filter
+  const searchActive = isFiltersActive(filters);
+  const matchedFiles = useMemo(
+    () => searchActive ? filterFiles(allFiles, filters) : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allFiles, filters]
+  );
+  const matchedPaths = useMemo(
+    () => searchActive ? new Set(matchedFiles.map((f) => f.path)) : undefined,
+    [searchActive, matchedFiles]
+  );
 
   const typeStats = useMemo(() => {
     if (!allFiles.length) return [];
@@ -159,14 +203,15 @@ export default function OverviewPage() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Stats bar */}
-      <div className="px-6 py-3 bg-surface-container-low border-b border-outline-variant/10 flex items-center gap-6 shrink-0">
+      <div className="px-4 py-2 bg-surface-container-low border-b border-outline-variant/10 flex items-center gap-3 shrink-0 flex-wrap">
         <Stat label="Total Size" value={formatBytes(result.totalSize)} />
         <div className="w-px h-6 bg-outline-variant/30" />
         <Stat label="Files" value={result.fileCount.toLocaleString()} />
         <div className="w-px h-6 bg-outline-variant/30" />
         <Stat label="Folders" value={result.folderCount.toLocaleString()} />
         <div className="w-px h-6 bg-outline-variant/30" />
-        <Stat label="Largest File" value={result.largestFile?.name ?? "—"} sub={result.largestFile ? formatBytes(result.largestFile.size) : ""} />
+        {/* Search bar */}
+        <SearchBar filters={filters} onChange={setFilters} />
         <div className="flex-1" />
         {result.issueCount > 0 && (
           <div className="flex items-center gap-1.5 px-3 py-1.5 bg-error/10 rounded-full">
@@ -183,22 +228,24 @@ export default function OverviewPage() {
           <span className="material-symbols-outlined text-[16px]">refresh</span>
           重新扫描
         </button>
-        <div className="flex items-center gap-1 bg-surface-container-high rounded-lg p-1">
-          {(["type", "age"] as ColorMode[]).map((m) => (
-            <button
-              key={m}
-              onClick={() => setColorMode(m)}
-              className={[
-                "px-3 py-1 rounded text-xs font-bold transition-all capitalize",
-                colorMode === m
-                  ? "bg-surface-container-lowest text-on-surface shadow-sm"
-                  : "text-on-surface-variant hover:text-on-surface",
-              ].join(" ")}
-            >
-              {m === "type" ? "By Type" : "By Age"}
-            </button>
-          ))}
-        </div>
+        {!searchActive && (
+          <div className="flex items-center gap-1 bg-surface-container-high rounded-lg p-1">
+            {(["type", "age"] as ColorMode[]).map((m) => (
+              <button
+                key={m}
+                onClick={() => setColorMode(m)}
+                className={[
+                  "px-3 py-1 rounded text-xs font-bold transition-all capitalize",
+                  colorMode === m
+                    ? "bg-surface-container-lowest text-on-surface shadow-sm"
+                    : "text-on-surface-variant hover:text-on-surface",
+                ].join(" ")}
+              >
+                {m === "type" ? "By Type" : "By Age"}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Main area */}
@@ -211,6 +258,7 @@ export default function OverviewPage() {
             selected={selected}
             currentFolderPath={treemapStack[treemapStack.length - 1]?.path}
             onNavigateToRoot={() => { setTreemapStack([result.tree]); setSelected(null); }}
+            matchedPaths={matchedPaths}
           />
         </div>
 
@@ -220,17 +268,23 @@ export default function OverviewPage() {
           className="w-1 shrink-0 cursor-col-resize bg-outline-variant/10 hover:bg-primary/40 transition-colors"
         />
 
-        {/* Center: treemap */}
+        {/* Center: treemap or search results */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          <TreemapCanvas
-            root={result.tree}
-            colorMode={colorMode}
-            selected={selected}
-            onSelect={setSelected}
-            stack={treemapStack}
-            onStackChange={setTreemapStack}
-          />
-          <TypeBar stats={typeStats} unknownExts={unknownExtStats} />
+          {searchActive ? (
+            <SearchResultList files={matchedFiles} />
+          ) : (
+            <>
+              <TreemapCanvas
+                root={result.tree}
+                colorMode={colorMode}
+                selected={selected}
+                onSelect={setSelected}
+                stack={treemapStack}
+                onStackChange={setTreemapStack}
+              />
+              <TypeBar stats={typeStats} unknownExts={unknownExtStats} />
+            </>
+          )}
         </div>
 
         {/* Right: detail + insight */}

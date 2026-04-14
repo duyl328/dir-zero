@@ -8,7 +8,8 @@ interface Props {
   selected: FolderChild | null;
   onSelect: (node: FolderChild) => void;
   currentFolderPath?: string;
-  onNavigateToRoot: () => void; // reset treemap stack back to root
+  onNavigateToRoot: () => void;
+  matchedPaths?: Set<string>; // when search is active: paths of matching files
 }
 
 function formatBytes(b: number): string {
@@ -38,6 +39,24 @@ function isAncestorOrSelf(ancestorPath: string, childPath: string): boolean {
   return childPath.startsWith(ancestorPath + "\\") || childPath.startsWith(ancestorPath + "/");
 }
 
+// Returns true if this folder contains any matched path
+function folderHasMatch(folder: FolderEntry, matchedPaths: Set<string>): boolean {
+  for (const child of folder.children) {
+    if (child.kind === "file" && matchedPaths.has(child.path)) return true;
+    if (child.kind === "folder" && folderHasMatch(child, matchedPaths)) return true;
+  }
+  return false;
+}
+
+function countFolderMatches(folder: FolderEntry, matchedPaths: Set<string>): number {
+  let n = 0;
+  for (const child of folder.children) {
+    if (child.kind === "file" && matchedPaths.has(child.path)) n++;
+    else if (child.kind === "folder") n += countFolderMatches(child, matchedPaths);
+  }
+  return n;
+}
+
 interface TreeNodeProps {
   child: FolderChild;
   depth: number;
@@ -45,9 +64,10 @@ interface TreeNodeProps {
   currentFolderPath?: string;
   onSelect: (node: FolderChild) => void;
   onContextMenu: (e: React.MouseEvent, child: FolderChild) => void;
+  matchedPaths?: Set<string>;
 }
 
-function TreeNode({ child, depth, selected, currentFolderPath, onSelect, onContextMenu }: TreeNodeProps) {
+function TreeNode({ child, depth, selected, currentFolderPath, onSelect, onContextMenu, matchedPaths }: TreeNodeProps) {
   // Auto-expand if this folder is on the path to the current treemap folder
   const shouldExpandForCurrent = child.kind === "folder" && currentFolderPath
     ? isAncestorOrSelf(child.path, currentFolderPath)
@@ -58,20 +78,33 @@ function TreeNode({ child, depth, selected, currentFolderPath, onSelect, onConte
     ? isAncestorOrSelf(child.path, selected.path) && selected.path !== child.path
     : false;
 
+  const isSearching = matchedPaths !== undefined;
+
+  // In search mode: auto-expand folders that contain matches
+  const shouldExpandForSearch = isSearching && child.kind === "folder"
+    ? folderHasMatch(child, matchedPaths!)
+    : false;
+
   const [expanded, setExpanded] = useState(shouldExpandForCurrent || shouldExpandForSelected);
 
-  // Sync expansion when currentFolderPath or selected changes
+  // Sync expansion when currentFolderPath, selected, or search changes
   useEffect(() => {
-    if (shouldExpandForCurrent || shouldExpandForSelected) setExpanded(true);
-  }, [shouldExpandForCurrent, shouldExpandForSelected]);
+    if (shouldExpandForCurrent || shouldExpandForSelected || shouldExpandForSearch) setExpanded(true);
+    else if (isSearching) setExpanded(false); // collapse non-matching folders when search activates
+  }, [shouldExpandForCurrent, shouldExpandForSelected, shouldExpandForSearch, isSearching]);
 
   const isSelected = selected !== null && selected.path === child.path;
   const isCurrentFolder = child.kind === "folder" && child.path === currentFolderPath;
-  // Ancestor of selected node — show subtle highlight
   const isAncestorOfSelected = !isSelected && selected !== null && child.kind === "folder"
     && isAncestorOrSelf(child.path, selected.path);
 
+  // Search-mode visibility
+  const isFileMatch = isSearching && child.kind === "file" && matchedPaths!.has(child.path);
+  const isFolderWithMatches = isSearching && child.kind === "folder" && folderHasMatch(child, matchedPaths!);
+  const isDimmed = isSearching && !isFileMatch && !isFolderWithMatches;
+
   if (child.kind === "file") {
+    if (isSearching && !isFileMatch) return null; // hide non-matching files in search mode
     return (
       <button
         onClick={() => onSelect(child)}
@@ -80,6 +113,8 @@ function TreeNode({ child, depth, selected, currentFolderPath, onSelect, onConte
           "w-full flex items-center gap-2 py-1.5 text-left transition-colors",
           isSelected
             ? "bg-primary/10 text-primary"
+            : isFileMatch
+            ? "text-primary/80 hover:bg-primary/5"
             : "text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface",
         ].join(" ")}
         style={{ paddingLeft: `${(depth + 1) * 14 + 4}px`, paddingRight: "12px" }}
@@ -93,9 +128,12 @@ function TreeNode({ child, depth, selected, currentFolderPath, onSelect, onConte
 
   const hasChildren = child.children.length > 0;
   const subFolders = child.children.filter((c) => c.kind === "folder");
+  const matchCount = isSearching && child.kind === "folder"
+    ? countFolderMatches(child, matchedPaths!)
+    : 0;
 
   return (
-    <div>
+    <div className={isDimmed ? "opacity-30" : undefined}>
       <button
         onClick={() => {
           onSelect(child);
@@ -121,7 +159,14 @@ function TreeNode({ child, depth, selected, currentFolderPath, onSelect, onConte
           {getFolderIcon(child.name)}
         </span>
         <span className="text-xs font-medium truncate flex-1">{child.name}</span>
-        <span className="text-[10px] font-bold shrink-0 opacity-60">{formatBytes(child.size)}</span>
+        {matchCount > 0 && (
+          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-primary/15 text-primary shrink-0">
+            {matchCount}
+          </span>
+        )}
+        {!isSearching && (
+          <span className="text-[10px] font-bold shrink-0 opacity-60">{formatBytes(child.size)}</span>
+        )}
       </button>
 
       {expanded && subFolders.length > 0 && (
@@ -135,6 +180,7 @@ function TreeNode({ child, depth, selected, currentFolderPath, onSelect, onConte
               currentFolderPath={currentFolderPath}
               onSelect={onSelect}
               onContextMenu={onContextMenu}
+              matchedPaths={matchedPaths}
             />
           ))}
           {subFolders.length > 50 && (
@@ -148,7 +194,7 @@ function TreeNode({ child, depth, selected, currentFolderPath, onSelect, onConte
   );
 }
 
-export default function DirectoryTree({ root, selected, onSelect, currentFolderPath, onNavigateToRoot }: Props) {
+export default function DirectoryTree({ root, selected, onSelect, currentFolderPath, onNavigateToRoot, matchedPaths }: Props) {
   const topChildren = [...root.children].sort((a, b) => b.size - a.size);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; child: FolderChild } | null>(null);
   const isAtRoot = !currentFolderPath || currentFolderPath === root.path;
@@ -189,6 +235,7 @@ export default function DirectoryTree({ root, selected, onSelect, currentFolderP
             currentFolderPath={currentFolderPath}
             onSelect={onSelect}
             onContextMenu={handleContextMenu}
+            matchedPaths={matchedPaths}
           />
         ))
       )}
