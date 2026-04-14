@@ -5,7 +5,7 @@ export interface SearchFilters {
   keyword: string;
   useRegex: boolean;
   types: FileTypeCategory[];
-  minSize: number | null; // bytes
+  minSize: number | null;
   modifiedWithin: "30d" | "1y" | "older1y" | null;
 }
 
@@ -21,20 +21,35 @@ export function isFiltersActive(f: SearchFilters): boolean {
   return f.keyword.trim() !== "" || f.types.length > 0 || f.minSize !== null || f.modifiedWithin !== null;
 }
 
-/** Returns null if the regex is invalid, otherwise the compiled RegExp */
+function globToRegex(pattern: string): RegExp {
+  // Escape regex special chars except * and ?
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(escaped.replace(/\*/g, ".*").replace(/\?/g, "."), "i");
+}
+
+export type SearchMode = "substring" | "glob" | "regex";
+
+export function detectMode(f: SearchFilters): SearchMode {
+  if (f.useRegex) return "regex";
+  if (/[*?]/.test(f.keyword)) return "glob";
+  return "substring";
+}
+
+/** Compile keyword to a matcher. Returns null if empty or invalid regex. */
 export function compileKeyword(f: SearchFilters): RegExp | string | null {
-  if (!f.keyword.trim()) return null;
-  if (!f.useRegex) return f.keyword.trim().toLowerCase();
-  try {
-    return new RegExp(f.keyword, "i");
-  } catch {
-    return null; // invalid regex — treat as no match
+  const kw = f.keyword.trim();
+  if (!kw) return null;
+  if (f.useRegex) {
+    try { return new RegExp(kw, "i"); } catch { return null; }
   }
+  if (/[*?]/.test(kw)) return globToRegex(kw);
+  return kw.toLowerCase();
 }
 
 interface Props {
   filters: SearchFilters;
   onChange: (f: SearchFilters) => void;
+  onEnter?: () => void;
 }
 
 const TYPE_OPTIONS: { value: FileTypeCategory; label: string }[] = [
@@ -56,11 +71,11 @@ const TYPE_OPTIONS: { value: FileTypeCategory; label: string }[] = [
 ];
 
 const SIZE_OPTIONS = [
-  { value: null,       label: "不限" },
-  { value: 10_000_000,  label: "> 10 MB" },
-  { value: 100_000_000, label: "> 100 MB" },
-  { value: 500_000_000, label: "> 500 MB" },
-  { value: 1_000_000_000, label: "> 1 GB" },
+  { value: null,            label: "不限" },
+  { value: 10_000_000,      label: "> 10 MB" },
+  { value: 100_000_000,     label: "> 100 MB" },
+  { value: 500_000_000,     label: "> 500 MB" },
+  { value: 1_000_000_000,   label: "> 1 GB" },
 ];
 
 const TIME_OPTIONS: { value: SearchFilters["modifiedWithin"]; label: string }[] = [
@@ -70,7 +85,13 @@ const TIME_OPTIONS: { value: SearchFilters["modifiedWithin"]; label: string }[] 
   { value: "older1y",  label: "超过 1 年未修改" },
 ];
 
-export default function SearchBar({ filters, onChange }: Props) {
+const MODE_BADGE: Record<SearchMode, { label: string; cls: string } | null> = {
+  substring: null,
+  glob:    { label: "glob", cls: "bg-sky-400/15 text-sky-500" },
+  regex:   { label: "regex", cls: "bg-amber-400/15 text-amber-500" },
+};
+
+export default function SearchBar({ filters, onChange, onEnter }: Props) {
   const [typeOpen, setTypeOpen] = useState(false);
   const [sizeOpen, setSizeOpen] = useState(false);
   const [timeOpen, setTimeOpen] = useState(false);
@@ -78,7 +99,6 @@ export default function SearchBar({ filters, onChange }: Props) {
   const sizeRef = useRef<HTMLDivElement>(null);
   const timeRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdowns on outside click
   useEffect(() => {
     function handler(e: MouseEvent) {
       if (typeRef.current && !typeRef.current.contains(e.target as Node)) setTypeOpen(false);
@@ -89,11 +109,6 @@ export default function SearchBar({ filters, onChange }: Props) {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const activeCount =
-    (filters.types.length > 0 ? 1 : 0) +
-    (filters.minSize !== null ? 1 : 0) +
-    (filters.modifiedWithin !== null ? 1 : 0);
-
   function toggleType(t: FileTypeCategory) {
     const next = filters.types.includes(t)
       ? filters.types.filter((x) => x !== t)
@@ -101,14 +116,25 @@ export default function SearchBar({ filters, onChange }: Props) {
     onChange({ ...filters, types: next });
   }
 
+  const mode = detectMode(filters);
+  const modeBadge = filters.keyword.trim() ? MODE_BADGE[mode] : null;
   const sizeLabel = SIZE_OPTIONS.find((o) => o.value === filters.minSize)?.label ?? "大小";
   const timeLabel = TIME_OPTIONS.find((o) => o.value === filters.modifiedWithin)?.label ?? "时间";
   const typesActive = filters.types.length > 0;
+  const anyFilterActive = filters.types.length > 0 || filters.minSize !== null || filters.modifiedWithin !== null;
+
+  const inputCls = [
+    "w-full pl-8 py-1.5 rounded-lg bg-surface-container text-xs text-on-surface",
+    "placeholder:text-on-surface-variant/40 outline-none focus:ring-1 transition-all",
+    mode === "regex" ? "font-mono focus:ring-amber-400/50 pr-20" :
+    mode === "glob"  ? "focus:ring-sky-400/50 pr-20" :
+                       "focus:ring-primary/50 pr-14",
+  ].join(" ");
 
   return (
     <div className="flex items-center gap-2 flex-1 min-w-0">
       {/* Keyword input */}
-      <div className="relative flex items-center flex-1 min-w-0 max-w-xs">
+      <div className="relative flex items-center flex-1 min-w-0 max-w-sm">
         <span className="material-symbols-outlined absolute left-2.5 text-[15px] text-on-surface-variant/50 pointer-events-none">
           search
         </span>
@@ -116,32 +142,43 @@ export default function SearchBar({ filters, onChange }: Props) {
           type="text"
           value={filters.keyword}
           onChange={(e) => onChange({ ...filters, keyword: e.target.value })}
-          placeholder={filters.useRegex ? "正则表达式…" : "搜索文件名 / 路径…"}
-          className={[
-            "w-full pl-8 py-1.5 rounded-lg bg-surface-container text-xs text-on-surface placeholder:text-on-surface-variant/40 outline-none focus:ring-1 transition-all",
-            filters.useRegex ? "pr-16 focus:ring-amber-400/50 font-mono" : "pr-14 focus:ring-primary/50",
-          ].join(" ")}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onEnter?.(); } }}
+          placeholder={mode === "regex" ? "正则表达式…" : "搜索文件名 / 路径… (支持 *.mp4 通配符)"}
+          className={inputCls}
         />
+        {/* Mode badge */}
+        {modeBadge && (
+          <span className={`absolute right-7 text-[9px] font-bold font-mono px-1 py-0.5 rounded ${modeBadge.cls}`}>
+            {modeBadge.label}
+          </span>
+        )}
         {/* Regex toggle */}
         <button
           onClick={() => onChange({ ...filters, useRegex: !filters.useRegex })}
-          title={filters.useRegex ? "关闭正则" : "启用正则"}
+          title={filters.useRegex ? "关闭正则模式" : "启用正则模式 (.*)\n当前支持 *.ext 通配符无需开启"}
           className={[
-            "absolute right-6 flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold font-mono transition-all",
+            "absolute right-1 flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold font-mono transition-all",
             filters.useRegex
               ? "bg-amber-400/20 text-amber-500"
-              : "text-on-surface-variant/30 hover:text-on-surface-variant",
+              : "text-on-surface-variant/25 hover:text-on-surface-variant/60",
           ].join(" ")}
         >
           .*
         </button>
-        {filters.keyword && (
+        {filters.keyword && !modeBadge && (
           <button
             onClick={() => onChange({ ...filters, keyword: "" })}
-            className="absolute right-1 text-on-surface-variant/40 hover:text-on-surface-variant transition-colors"
+            className="absolute right-7 text-on-surface-variant/40 hover:text-on-surface-variant transition-colors"
           >
             <span className="material-symbols-outlined text-[14px]">close</span>
           </button>
+        )}
+        {filters.keyword && modeBadge && (
+          <button
+            onClick={() => onChange({ ...filters, keyword: "" })}
+            className="absolute right-7 hidden"
+            aria-hidden
+          />
         )}
       </div>
 
@@ -177,10 +214,9 @@ export default function SearchBar({ filters, onChange }: Props) {
                     : "text-on-surface-variant hover:bg-surface-container-high",
                 ].join(" ")}
               >
-                {filters.types.includes(opt.value) && (
-                  <span className="material-symbols-outlined text-[13px]">check</span>
-                )}
-                {!filters.types.includes(opt.value) && <span className="w-[13px]" />}
+                {filters.types.includes(opt.value)
+                  ? <span className="material-symbols-outlined text-[13px]">check</span>
+                  : <span className="w-[13px]" />}
                 {opt.label}
               </button>
             ))}
@@ -257,7 +293,7 @@ export default function SearchBar({ filters, onChange }: Props) {
       </div>
 
       {/* Clear all */}
-      {activeCount > 0 && (
+      {anyFilterActive && (
         <button
           onClick={() => onChange(EMPTY_FILTERS)}
           className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs text-on-surface-variant/60 hover:text-error hover:bg-error/10 transition-all shrink-0"

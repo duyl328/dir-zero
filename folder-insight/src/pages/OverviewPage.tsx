@@ -115,6 +115,17 @@ export default function OverviewPage() {
     [searchActive, matchedFiles]
   );
 
+  // Single-click a search result: select it and navigate treemap to its parent folder
+  function handleResultSelect(file: FileEntry | null) {
+    if (!file) { setSelected(null); return; }
+    setSelected({ kind: "file", ...file });
+    if (!result) return;
+    const sep = file.path.includes("\\") ? "\\" : "/";
+    const parentPath = file.path.substring(0, file.path.lastIndexOf(sep));
+    const path = findPathToFolder(result.tree, parentPath);
+    if (path) setTreemapStack(path);
+  }
+
   const typeStats = useMemo(() => {
     if (!allFiles.length) return [];
     const totals: Record<string, number> = {};
@@ -202,46 +213,58 @@ export default function OverviewPage() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Stats bar */}
-      <div className="px-4 py-2 bg-surface-container-low border-b border-outline-variant/10 flex items-center gap-3 shrink-0 flex-wrap">
-        <Stat label="Total Size" value={formatBytes(result.totalSize)} />
-        <div className="w-px h-6 bg-outline-variant/30" />
-        <Stat label="Files" value={result.fileCount.toLocaleString()} />
-        <div className="w-px h-6 bg-outline-variant/30" />
-        <Stat label="Folders" value={result.folderCount.toLocaleString()} />
-        <div className="w-px h-6 bg-outline-variant/30" />
-        {/* Search bar */}
-        <SearchBar filters={filters} onChange={setFilters} />
+      {/* Stats + search bar */}
+      <div className="px-4 py-2.5 bg-surface-container-low border-b border-outline-variant/10 flex items-center gap-2 shrink-0">
+        {/* Stats group */}
+        <div className="flex items-center gap-1 shrink-0">
+          <StatCard icon="hard_drive" label="总大小" value={formatBytes(result.totalSize)} />
+          <StatCard icon="insert_drive_file" label="文件" value={result.fileCount.toLocaleString()} />
+          <StatCard icon="folder" label="文件夹" value={result.folderCount.toLocaleString()} />
+        </div>
+
+        <div className="w-px h-8 bg-outline-variant/20 mx-1 shrink-0" />
+
+        {/* Search bar — takes remaining space */}
+        <SearchBar
+          filters={filters}
+          onChange={setFilters}
+          onEnter={() => matchedFiles.length > 0 && handleResultSelect(matchedFiles[0])}
+        />
+
         <div className="flex-1" />
+
         {result.issueCount > 0 && (
-          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-error/10 rounded-full">
-            <span className="material-symbols-outlined text-error text-[16px]">warning</span>
-            <span className="text-xs font-bold text-error">{result.issueCount} issues found</span>
+          <div className="flex items-center gap-1.5 px-2.5 py-1 bg-error/10 rounded-full shrink-0">
+            <span className="material-symbols-outlined text-error text-[15px]">warning</span>
+            <span className="text-xs font-bold text-error">{result.issueCount} issues</span>
           </div>
         )}
-        {/* Rescan button */}
+
+        {/* Rescan */}
         <button
           onClick={() => setScanStatus("configuring")}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant hover:text-primary transition-all text-xs font-bold"
+          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant hover:text-primary transition-all text-xs font-bold shrink-0"
           title="重新扫描"
         >
-          <span className="material-symbols-outlined text-[16px]">refresh</span>
+          <span className="material-symbols-outlined text-[15px]">refresh</span>
           重新扫描
         </button>
+
+        {/* Color mode toggle — hidden during search */}
         {!searchActive && (
-          <div className="flex items-center gap-1 bg-surface-container-high rounded-lg p-1">
+          <div className="flex items-center gap-0.5 bg-surface-container-high rounded-lg p-0.5 shrink-0">
             {(["type", "age"] as ColorMode[]).map((m) => (
               <button
                 key={m}
                 onClick={() => setColorMode(m)}
                 className={[
-                  "px-3 py-1 rounded text-xs font-bold transition-all capitalize",
+                  "px-2.5 py-1 rounded text-xs font-bold transition-all",
                   colorMode === m
                     ? "bg-surface-container-lowest text-on-surface shadow-sm"
                     : "text-on-surface-variant hover:text-on-surface",
                 ].join(" ")}
               >
-                {m === "type" ? "By Type" : "By Age"}
+                {m === "type" ? "按类型" : "按时间"}
               </button>
             ))}
           </div>
@@ -271,9 +294,34 @@ export default function OverviewPage() {
         {/* Center: treemap or search results */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {searchActive ? (
-            <SearchResultList files={matchedFiles} />
+            <SearchResultList
+              files={matchedFiles}
+              onSelect={handleResultSelect}
+              selectedPath={selected?.path ?? null}
+            />
           ) : (
             <>
+              {/* Breadcrumb path */}
+              {treemapStack.length > 1 && (
+                <div className="flex items-center gap-1 px-3 py-1.5 bg-surface-container-low/80 border-b border-outline-variant/10 shrink-0 overflow-x-auto">
+                  {treemapStack.map((entry, i) => (
+                    <span key={entry.path} className="flex items-center gap-1 shrink-0">
+                      {i > 0 && <span className="material-symbols-outlined text-[12px] text-on-surface-variant/30">chevron_right</span>}
+                      <button
+                        onClick={() => setTreemapStack(treemapStack.slice(0, i + 1))}
+                        className={[
+                          "text-[11px] font-medium transition-colors px-1 py-0.5 rounded",
+                          i === treemapStack.length - 1
+                            ? "text-primary font-bold"
+                            : "text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high",
+                        ].join(" ")}
+                      >
+                        {i === 0 ? (entry.name || entry.path) : entry.name}
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
               <TreemapCanvas
                 root={result.tree}
                 colorMode={colorMode}
@@ -297,12 +345,14 @@ export default function OverviewPage() {
   );
 }
 
-function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function StatCard({ icon, label, value }: { icon: string; label: string; value: string }) {
   return (
-    <div className="flex flex-col">
-      <span className="text-[9px] uppercase tracking-widest font-bold text-on-surface-variant/60">{label}</span>
-      <span className="text-sm font-bold text-on-surface leading-tight">{value}</span>
-      {sub && <span className="text-[10px] text-on-surface-variant">{sub}</span>}
+    <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high transition-colors">
+      <span className="material-symbols-outlined text-[16px] text-primary/70 shrink-0">{icon}</span>
+      <div className="flex flex-col leading-none">
+        <span className="text-[9px] uppercase tracking-widest font-bold text-on-surface-variant/50">{label}</span>
+        <span className="text-sm font-bold text-on-surface mt-0.5">{value}</span>
+      </div>
     </div>
   );
 }

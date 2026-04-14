@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { revealItemInDir, openPath } from "@tauri-apps/plugin-opener";
 import type { FileEntry } from "../../types";
 
@@ -7,6 +7,8 @@ type SortDir = "asc" | "desc";
 
 interface Props {
   files: FileEntry[];
+  onSelect: (file: FileEntry | null) => void;
+  selectedPath: string | null;
 }
 
 function formatBytes(b: number): string {
@@ -39,9 +41,15 @@ const TYPE_LABEL: Record<string, string> = {
 
 const PAGE_SIZE = 200;
 
-export default function SearchResultList({ files }: Props) {
+function openFile(path: string) {
+  revealItemInDir(path).catch(() => openPath(path).catch(() => {}));
+}
+
+export default function SearchResultList({ files, onSelect, selectedPath }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("size");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const listRef = useRef<HTMLDivElement>(null);
+  const rowRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   function handleSort(key: SortKey) {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -60,6 +68,40 @@ export default function SearchResultList({ files }: Props) {
     });
     return arr.slice(0, PAGE_SIZE);
   }, [files, sortKey, sortDir]);
+
+  // Derive focused index from selectedPath
+  const focusedIdx = useMemo(
+    () => sorted.findIndex((f) => f.path === selectedPath),
+    [sorted, selectedPath]
+  );
+
+  // Scroll focused row into view
+  useEffect(() => {
+    if (focusedIdx >= 0) {
+      rowRefs.current[focusedIdx]?.scrollIntoView({ block: "nearest" });
+    }
+  }, [focusedIdx]);
+
+  // Reset row refs array size on sort change
+  useEffect(() => {
+    rowRefs.current = rowRefs.current.slice(0, sorted.length);
+  }, [sorted.length]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (sorted.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      const next = focusedIdx < sorted.length - 1 ? focusedIdx + 1 : 0;
+      onSelect(sorted[next]);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      const prev = focusedIdx > 0 ? focusedIdx - 1 : sorted.length - 1;
+      onSelect(sorted[prev]);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (focusedIdx >= 0) openFile(sorted[focusedIdx].path);
+    }
+  }, [sorted, focusedIdx, onSelect]);
 
   function SortIcon({ k }: { k: SortKey }) {
     if (sortKey !== k) return <span className="material-symbols-outlined text-[12px] opacity-20">unfold_more</span>;
@@ -80,15 +122,15 @@ export default function SearchResultList({ files }: Props) {
   }
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
+    <div className="flex-1 flex flex-col overflow-hidden" onKeyDown={handleKeyDown} tabIndex={-1}>
       {/* Header */}
       <div className="flex items-center px-4 py-2 border-b border-outline-variant/10 bg-surface-container-low/60 shrink-0 gap-2">
         <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/50">
           找到 {files.length.toLocaleString()} 个文件
           {files.length > PAGE_SIZE && `，显示前 ${PAGE_SIZE}`}
         </span>
+        <span className="text-[10px] text-on-surface-variant/30 ml-1">· 单击选中 · 双击打开 · ↑↓ 切换 · ⏎ 打开</span>
         <div className="flex-1" />
-        {/* Sort buttons */}
         {(["name", "size", "type", "date"] as SortKey[]).map((k) => (
           <button
             key={k}
@@ -102,46 +144,68 @@ export default function SearchResultList({ files }: Props) {
       </div>
 
       {/* Rows */}
-      <div className="flex-1 overflow-y-auto">
-        {sorted.map((f) => (
-          <button
-            key={f.path}
-            onClick={() => revealItemInDir(f.path).catch(() => openPath(f.path).catch(() => {}))}
-            title={f.path}
-            className="w-full flex items-center gap-3 px-4 py-2 hover:bg-surface-container-high transition-colors text-left group border-b border-outline-variant/5"
-          >
-            {/* Type icon */}
-            <span className="material-symbols-outlined text-[18px] shrink-0 text-on-surface-variant/50 group-hover:text-primary transition-colors">
-              {TYPE_ICON[f.fileType] ?? "insert_drive_file"}
-            </span>
+      <div ref={listRef} className="flex-1 overflow-y-auto outline-none">
+        {sorted.map((f, idx) => {
+          const isSelected = f.path === selectedPath;
+          return (
+            <button
+              key={f.path}
+              ref={(el) => { rowRefs.current[idx] = el; }}
+              onClick={() => onSelect(isSelected ? null : f)}
+              onDoubleClick={() => openFile(f.path)}
+              title={`单击选中 · 双击在文件管理器打开\n${f.path}`}
+              className={[
+                "w-full flex items-center gap-3 px-4 py-2 transition-colors text-left group border-b border-outline-variant/5 outline-none",
+                isSelected
+                  ? "bg-primary/10 border-l-2 border-l-primary"
+                  : "hover:bg-surface-container-high",
+              ].join(" ")}
+            >
+              {/* Type icon */}
+              <span className={[
+                "material-symbols-outlined text-[18px] shrink-0 transition-colors",
+                isSelected ? "text-primary" : "text-on-surface-variant/50 group-hover:text-primary",
+              ].join(" ")}>
+                {TYPE_ICON[f.fileType] ?? "insert_drive_file"}
+              </span>
 
-            {/* Name + path */}
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium text-on-surface truncate leading-tight">{f.name}</p>
-              <p className="text-[10px] text-on-surface-variant/50 truncate mt-0.5 font-mono">{f.path}</p>
-            </div>
+              {/* Name + path */}
+              <div className="flex-1 min-w-0">
+                <p className={[
+                  "text-xs font-medium truncate leading-tight",
+                  isSelected ? "text-primary font-bold" : "text-on-surface",
+                ].join(" ")}>{f.name}</p>
+                <p className="text-[10px] text-on-surface-variant/50 truncate mt-0.5 font-mono">{f.path}</p>
+              </div>
 
-            {/* Type badge */}
-            <span className="text-[9px] font-bold uppercase tracking-wide text-on-surface-variant/40 shrink-0 hidden sm:block w-16 text-right">
-              {TYPE_LABEL[f.fileType] ?? f.fileType}
-            </span>
+              {/* Type badge */}
+              <span className="text-[9px] font-bold uppercase tracking-wide text-on-surface-variant/40 shrink-0 hidden sm:block w-16 text-right">
+                {TYPE_LABEL[f.fileType] ?? f.fileType}
+              </span>
 
-            {/* Date */}
-            <span className="text-[10px] text-on-surface-variant/50 shrink-0 w-24 text-right hidden md:block">
-              {formatDate(f.modifiedAt)}
-            </span>
+              {/* Date */}
+              <span className="text-[10px] text-on-surface-variant/50 shrink-0 w-24 text-right hidden md:block">
+                {formatDate(f.modifiedAt)}
+              </span>
 
-            {/* Size */}
-            <span className="text-xs font-bold text-on-surface-variant shrink-0 w-16 text-right">
-              {formatBytes(f.size)}
-            </span>
+              {/* Size */}
+              <span className={[
+                "text-xs font-bold shrink-0 w-16 text-right",
+                isSelected ? "text-primary" : "text-on-surface-variant",
+              ].join(" ")}>
+                {formatBytes(f.size)}
+              </span>
 
-            {/* Open icon */}
-            <span className="material-symbols-outlined text-[14px] text-on-surface-variant/20 group-hover:text-primary transition-colors shrink-0">
-              open_in_new
-            </span>
-          </button>
-        ))}
+              {/* Open hint (only on selected row) */}
+              <span className={[
+                "material-symbols-outlined text-[14px] shrink-0 transition-colors",
+                isSelected ? "text-primary/60" : "text-on-surface-variant/15 group-hover:text-on-surface-variant/40",
+              ].join(" ")}>
+                open_in_new
+              </span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
