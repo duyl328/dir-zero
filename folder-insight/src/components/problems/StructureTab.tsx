@@ -124,23 +124,20 @@ function IssueCard({ icon, label, detail, severity, items, canDelete, selected, 
                 <div
                   key={item.path}
                   onContextMenu={(e) => onCtx(e, item)}
+                  onClick={() => canDelete && onToggleItem(item.path)}
                   className={[
                     "flex items-center gap-3 px-4 py-2 border-b border-outline-variant/5 last:border-0 transition-colors group",
+                    canDelete ? "cursor-pointer" : "",
                     canDelete && isItemSelected ? "bg-primary/5" : "hover:bg-surface-container-high",
                   ].join(" ")}
                 >
                   {canDelete && (
-                    <div
-                      className="shrink-0 flex items-center justify-center w-5 h-5 cursor-pointer"
-                      onClick={() => onToggleItem(item.path)}
-                    >
-                      <span className={[
-                        "material-symbols-outlined text-[18px] transition-colors",
-                        isItemSelected ? "text-primary" : "text-on-surface-variant/25 hover:text-on-surface-variant",
-                      ].join(" ")}>
-                        {isItemSelected ? "check_circle" : "radio_button_unchecked"}
-                      </span>
-                    </div>
+                    <span className={[
+                      "material-symbols-outlined text-[18px] shrink-0 transition-colors",
+                      isItemSelected ? "text-primary" : "text-on-surface-variant/25 group-hover:text-on-surface-variant",
+                    ].join(" ")}>
+                      {isItemSelected ? "check_circle" : "radio_button_unchecked"}
+                    </span>
                   )}
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium text-on-surface truncate">{item.name}</p>
@@ -148,7 +145,7 @@ function IssueCard({ icon, label, detail, severity, items, canDelete, selected, 
                   </div>
                   <span className="text-[10px] text-on-surface-variant/40 shrink-0">{item.detail}</span>
                   <button
-                    onClick={() => revealItemInDir(item.path).catch(() => {})}
+                    onClick={(e) => { e.stopPropagation(); revealItemInDir(item.path).catch(() => {}); }}
                     title="在文件管理器中打开"
                     className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 shrink-0"
                   >
