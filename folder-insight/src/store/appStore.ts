@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { ScanSession, ScanStatus, ScanProgress, ScanResult, ExcludeRule, DuplicateCluster } from "../types";
+import type { Locale } from "../i18n";
 
 type DupStatus = "idle" | "scanning" | "cancelling" | "done";
 
@@ -8,6 +9,7 @@ interface AppState {
   excludeRules: ExcludeRule[];
   duplicatesResult: DuplicateCluster[] | null;
   duplicatesStatus: DupStatus;
+  locale: Locale;
 
   // Actions
   setScanRoots: (roots: string[]) => void;
@@ -20,6 +22,7 @@ interface AppState {
   removeExcludeRule: (id: string) => void;
   setDuplicatesResult: (clusters: DuplicateCluster[]) => void;
   setDuplicatesStatus: (status: DupStatus) => void;
+  setLocale: (locale: Locale) => void;
 }
 
 const defaultSession: ScanSession = {
@@ -47,6 +50,7 @@ export const useAppStore = create<AppState>((set) => ({
   excludeRules: builtinRules,
   duplicatesResult: null,
   duplicatesStatus: "idle",
+  locale: (localStorage.getItem("locale") as Locale | null) ?? "zh",
 
   setScanRoots: (roots) =>
     set((s) => ({ session: { ...s.session, roots } })),
@@ -87,4 +91,9 @@ export const useAppStore = create<AppState>((set) => ({
 
   setDuplicatesStatus: (status) =>
     set({ duplicatesStatus: status }),
+
+  setLocale: (locale) => {
+    localStorage.setItem("locale", locale);
+    set({ locale });
+  },
 }));

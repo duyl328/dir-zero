@@ -1,15 +1,17 @@
 import { NavLink, useLocation } from "react-router-dom";
 import { useAppStore } from "../../store/appStore";
-
-const navItems = [
-  { to: "/overview", icon: "visibility", label: "See Clearly" },
-  { to: "/problems", icon: "report_problem", label: "Find Problems" },
-  { to: "/types", icon: "category", label: "File Types" },
-];
+import { useT } from "../../hooks/useT";
 
 export default function Sidebar() {
   const location = useLocation();
   const { session, resetSession, setScanStatus } = useAppStore();
+  const t = useT();
+
+  const navItems = [
+    { to: "/overview", icon: "visibility", label: t.sidebar.overview },
+    { to: "/problems", icon: "report_problem", label: t.sidebar.problems },
+    { to: "/types", icon: "category", label: t.sidebar.fileTypes },
+  ];
 
   function handleNewScan() {
     resetSession();
@@ -62,7 +64,7 @@ export default function Sidebar() {
         className="mb-6 mx-2 py-2.5 px-4 rounded-xl cta-gradient text-on-primary font-headline font-bold text-sm shadow-md hover:opacity-90 transition-opacity flex items-center justify-center gap-2 active:scale-95 duration-150"
       >
         <span className="material-symbols-outlined text-[18px]">add</span>
-        New Scan
+        {t.sidebar.newScan}
       </button>
 
       {/* Bottom links */}
@@ -79,7 +81,7 @@ export default function Sidebar() {
           }
         >
           <span className="material-symbols-outlined text-[20px]">settings</span>
-          <span>Settings</span>
+          <span>{t.sidebar.settings}</span>
         </NavLink>
       </div>
 
@@ -90,8 +92,8 @@ export default function Sidebar() {
             <span className="w-2 h-2 rounded-full bg-primary animate-pulse shrink-0" />
             <span className="text-[11px] font-bold text-primary truncate">
               {session.progress
-                ? `${(session.progress.totalSize / 1e9).toFixed(1)} GB found`
-                : "Scanning…"}
+                ? `${(session.progress.totalSize / 1e9).toFixed(1)} ${t.sidebar.gbFound}`
+                : t.sidebar.scanning}
             </span>
           </div>
         </div>

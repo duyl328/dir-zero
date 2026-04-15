@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useAppStore } from "../store/appStore";
+import { useT } from "../hooks/useT";
 import DuplicatesTab from "../components/problems/DuplicatesTab";
 import StructureTab from "../components/problems/StructureTab";
 import ResidueTab from "../components/problems/ResidueTab";
@@ -29,6 +30,7 @@ function formatBytes(b: number) {
 
 export default function FindProblemsPage() {
   const { session, duplicatesResult, duplicatesStatus, setDuplicatesResult, setDuplicatesStatus } = useAppStore();
+  const t = useT();
   const result = session.result;
   const [tab, setTab] = useState<Tab>("residue");
   const [dupProgress, setDupProgress] = useState<{ processed: number; total: number } | null>(null);
@@ -46,11 +48,11 @@ export default function FindProblemsPage() {
   const markDeleteComplete = useCallback((tabId: Tab, label: string, succeeded: number, failed: number) => {
     setActiveDeletes((prev) => { const next = new Set(prev); next.delete(tabId); return next; });
     if (failed === 0) {
-      showToast(`${label}：已移到回收站 ${succeeded} 个`, "check_circle");
+      showToast(`${label}：${t.duplicates.toastSuccess(succeeded)}`, "check_circle");
     } else {
-      showToast(`${label}：完成，${failed} 个失败`, "warning");
+      showToast(`${label}：${t.duplicates.toastFail(failed)}`, "warning");
     }
-  }, [showToast]);
+  }, [showToast, t]);
 
   // Reset per-session state when a new scan starts
   const prevSessionId = useRef(session.id);
@@ -155,9 +157,9 @@ export default function FindProblemsPage() {
   const totalSavings = residueSavings + dupSavings;
 
   const TABS: { id: Tab; icon: string; label: string; count: number }[] = [
-    { id: "residue",    icon: "delete_sweep",  label: "残留",  count: residueCount },
-    { id: "structure",  icon: "account_tree",  label: "结构",  count: structureCount },
-    { id: "duplicates", icon: "file_copy",     label: "重复",  count: dupCount },
+    { id: "residue",    icon: "delete_sweep",  label: t.problems.tabResidue,    count: residueCount },
+    { id: "structure",  icon: "account_tree",  label: t.problems.tabStructure,  count: structureCount },
+    { id: "duplicates", icon: "file_copy",     label: t.problems.tabDuplicates, count: dupCount },
   ];
 
   if (!result) {
@@ -166,10 +168,8 @@ export default function FindProblemsPage() {
         <div className="w-20 h-20 rounded-3xl bg-primary/10 flex items-center justify-center mb-6 shadow-inner">
           <span className="material-symbols-outlined text-primary text-4xl">manage_search</span>
         </div>
-        <h2 className="font-headline text-xl font-extrabold text-on-surface mb-2">先完成一次扫描</h2>
-        <p className="text-sm text-on-surface-variant max-w-xs">
-          请先在「透视」页面扫描文件夹，然后回到这里查看问题。
-        </p>
+        <h2 className="font-headline text-xl font-extrabold text-on-surface mb-2">{t.problems.emptyTitle}</h2>
+        <p className="text-sm text-on-surface-variant max-w-xs">{t.problems.emptyDesc}</p>
       </div>
     );
   }
@@ -181,16 +181,16 @@ export default function FindProblemsPage() {
         <div className="flex items-end justify-between mb-4">
           <div>
             <h2 className="font-headline text-2xl font-extrabold text-on-surface tracking-tight">
-              发现问题
+              {t.problems.title}
             </h2>
             <p className="text-sm text-on-surface-variant mt-1">
-              扫描结果中发现的可清理内容
+              {t.problems.subtitle}
             </p>
           </div>
           {totalSavings > 0 && (
             <div className="bg-surface-container-low px-5 py-3 rounded-xl text-right">
               <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-0.5">
-                可释放空间
+                {t.problems.reclaimable}
               </p>
               <p className="font-headline text-2xl font-extrabold text-primary tracking-tight">
                 {formatBytes(totalSavings)}

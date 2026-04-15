@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import ContextMenu from "../ui/ContextMenu";
 import { useToast } from "../../hooks/useToast";
+import { useT } from "../../hooks/useT";
 import type { StructureAnalysisResult, StructureItem } from "../../analysis/structureAnalysis";
 
 interface Props {
@@ -30,6 +31,7 @@ interface IssueCardProps {
 interface CtxState { x: number; y: number; item: StructureItem }
 
 function IssueCard({ icon, label, detail, severity, items, canDelete, selected, onToggleItem, onToggleAll, onCtx }: IssueCardProps) {
+  const t = useT();
   const [expanded, setExpanded] = useState(false);
 
   if (items.length === 0) return null;
@@ -54,7 +56,7 @@ function IssueCard({ icon, label, detail, severity, items, canDelete, selected, 
           <div
             className="shrink-0 flex items-center justify-center w-10 h-10 -ml-2 -my-2 rounded-lg cursor-pointer hover:bg-surface-container-high transition-colors"
             onClick={(e) => { e.stopPropagation(); onToggleAll(items.map((i) => i.path)); }}
-            title={allSelected ? "取消全选" : "全选此类"}
+            title={allSelected ? t.structure.deselectAll : t.structure.selectAll}
           >
             <span className={[
               "material-symbols-outlined text-[22px] transition-colors",
@@ -86,12 +88,12 @@ function IssueCard({ icon, label, detail, severity, items, canDelete, selected, 
               "text-[9px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-tight",
               severity === "safe" ? "bg-tertiary/10 text-tertiary" : "bg-amber-100 text-amber-700",
             ].join(" ")}>
-              {severity === "safe" ? "安全" : "注意"}
+              {severity === "safe" ? t.structure.safe : t.structure.caution}
             </span>
           </div>
           <p className="text-xs text-on-surface-variant leading-snug">{detail}</p>
           <p className="text-[10px] font-bold text-on-surface-variant/60 mt-1">
-            {items.length.toLocaleString()} 个
+            {`${items.length.toLocaleString()}${t.structure.items}`}
           </p>
         </div>
 
@@ -113,10 +115,10 @@ function IssueCard({ icon, label, detail, severity, items, canDelete, selected, 
                 onClick={() => onToggleAll(items.map((i) => i.path))}
                 className="text-[10px] font-bold text-primary hover:underline"
               >
-                {allSelected ? "取消全选" : "全选"}
+                {allSelected ? t.structure.deselectAll : t.structure.selectAll}
               </button>
               <span className="text-[10px] text-on-surface-variant/40">
-                已选 {items.filter((i) => selected.has(i.path)).length} / {items.length}
+                {`${t.structure.selected} ${items.filter((i) => selected.has(i.path)).length} / ${items.length}`}
               </span>
             </div>
           )}
@@ -149,7 +151,7 @@ function IssueCard({ icon, label, detail, severity, items, canDelete, selected, 
                   <span className="text-[10px] text-on-surface-variant/40 shrink-0">{item.detail}</span>
                   <button
                     onClick={(e) => { e.stopPropagation(); revealItemInDir(item.path).catch(() => {}); }}
-                    title="在文件管理器中打开"
+                    title={t.structure.revealInExplorer}
                     className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 shrink-0"
                   >
                     <span className="material-symbols-outlined text-[14px] text-on-surface-variant/50 hover:text-primary transition-colors">open_in_new</span>
@@ -165,6 +167,7 @@ function IssueCard({ icon, label, detail, severity, items, canDelete, selected, 
 }
 
 export default function StructureTab({ data, onRefresh, onDeleted, onDeleteStart, onDeleteComplete }: Props) {
+  const t = useT();
   const { show: showToast, ToastContainer } = useToast();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
@@ -249,8 +252,8 @@ export default function StructureTab({ data, onRefresh, onDeleted, onDeleteStart
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
         <span className="material-symbols-outlined text-4xl text-tertiary/60">check_circle</span>
-        <p className="text-sm font-bold text-on-surface">未发现结构问题</p>
-        <p className="text-xs text-on-surface-variant/60">目录结构整洁</p>
+        <p className="text-sm font-bold text-on-surface">{t.structure.emptyTitle}</p>
+        <p className="text-xs text-on-surface-variant/60">{t.structure.emptyDesc}</p>
       </div>
     );
   }
@@ -260,27 +263,27 @@ export default function StructureTab({ data, onRefresh, onDeleted, onDeleteStart
   return (
     <div className="px-8 py-6 pb-28 space-y-2">
       <p className="text-xs text-on-surface-variant/60 mb-3">
-        空文件夹和零字节文件可移到回收站；其他问题仅供参考。
+        {t.structure.hint}
       </p>
 
-      <IssueCard icon="folder_off" label="空文件夹" severity="safe"
-        detail="完全空的目录，无任何文件或子文件夹"
+      <IssueCard icon="folder_off" label={t.structure.emptyFolders} severity="safe"
+        detail={t.structure.emptyFoldersDesc}
         items={filteredData.emptyFolders} canDelete {...cardProps} />
 
-      <IssueCard icon="draft" label="零字节文件" severity="safe"
-        detail="大小为 0 字节的文件，通常是失败下载或崩溃残留"
+      <IssueCard icon="draft" label={t.structure.zeroBytes} severity="safe"
+        detail={t.structure.zeroBytesDesc}
         items={filteredData.zeroByteFiles} canDelete {...cardProps} />
 
-      <IssueCard icon="straighten" label="路径问题" severity="caution"
-        detail="超长路径（>200 字符）或深层嵌套（>8 层），可能影响兼容性"
+      <IssueCard icon="straighten" label={t.structure.pathIssues} severity="caution"
+        detail={t.structure.pathIssuesDesc}
         items={filteredData.pathIssues} {...cardProps} />
 
-      <IssueCard icon="linear_scale" label="单子目录链" severity="caution"
-        detail="连续只含一个子文件夹的目录链，形成冗余嵌套"
+      <IssueCard icon="linear_scale" label={t.structure.singleChain} severity="caution"
+        detail={t.structure.singleChainDesc}
         items={filteredData.singleChildChains} {...cardProps} />
 
-      <IssueCard icon="grain" label="小文件过密" severity="caution"
-        detail="文件数量极多但总体积小，可能是构建产物或缓存"
+      <IssueCard icon="grain" label={t.structure.denseSmall} severity="caution"
+        detail={t.structure.denseSmallDesc}
         items={filteredData.denseSmall} {...cardProps} />
 
       {/* Floating action bar */}
@@ -289,9 +292,9 @@ export default function StructureTab({ data, onRefresh, onDeleted, onDeleteStart
           {deleting && deleteProgress ? (
             <div className="flex items-center gap-5">
               <div>
-                <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">正在移到回收站</p>
+                <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">{t.structure.movingToTrash}</p>
                 <p className="font-headline text-lg font-extrabold text-on-surface">
-                  {deleteProgress.done} / {deleteProgress.total} 个项目
+                  {`${deleteProgress.done} / ${deleteProgress.total} ${t.structure.items}`}
                 </p>
               </div>
               <div className="w-40">
@@ -309,9 +312,9 @@ export default function StructureTab({ data, onRefresh, onDeleted, onDeleteStart
           ) : (
             <>
               <div>
-                <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">已选中</p>
+                <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">{t.structure.selectedItems}</p>
                 <p className="font-headline text-lg font-extrabold text-on-surface">
-                  {selected.size.toLocaleString()} 个项目
+                  {`${selected.size.toLocaleString()} ${t.structure.items}`}
                 </p>
               </div>
               <div className="flex items-center gap-3">
@@ -319,14 +322,14 @@ export default function StructureTab({ data, onRefresh, onDeleted, onDeleteStart
                   onClick={() => setSelected(new Set())}
                   className="px-5 py-2.5 rounded-lg text-sm font-semibold text-on-surface-variant hover:bg-surface-container-high transition-colors"
                 >
-                  取消
+                  {t.structure.cancel}
                 </button>
                 <button
                   onClick={handleDelete} disabled={deleting}
                   className="cta-gradient px-7 py-2.5 rounded-lg text-sm font-bold text-on-primary shadow-lg shadow-primary/20 flex items-center gap-2 active:scale-95 duration-150 disabled:opacity-60"
                 >
                   <span className="material-symbols-outlined text-[18px]">delete_sweep</span>
-                  移到回收站
+                  {t.structure.moveToTrash}
                 </button>
               </div>
             </>
@@ -341,17 +344,17 @@ export default function StructureTab({ data, onRefresh, onDeleted, onDeleteStart
           onClose={() => setCtx(null)}
           items={[
             {
-              label: "复制文件名",
+              label: t.structure.copyName,
               icon: "file_copy",
-              onClick: () => { navigator.clipboard.writeText(ctx.item.name); showToast("已复制文件名"); },
+              onClick: () => { navigator.clipboard.writeText(ctx.item.name); showToast(t.structure.copiedName); },
             },
             {
-              label: "复制完整路径",
+              label: t.structure.copyPath,
               icon: "content_copy",
-              onClick: () => { navigator.clipboard.writeText(ctx.item.path); showToast("已复制完整路径"); },
+              onClick: () => { navigator.clipboard.writeText(ctx.item.path); showToast(t.structure.copiedPath); },
             },
             {
-              label: "在文件管理器中打开",
+              label: t.structure.revealInExplorer,
               icon: "folder_open",
               onClick: () => revealItemInDir(ctx.item.path).catch(() => {}),
             },

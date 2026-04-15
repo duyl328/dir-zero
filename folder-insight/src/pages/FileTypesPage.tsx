@@ -3,37 +3,62 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useMemo, useState, useCallback } from "react";
 import { useAppStore } from "../store/appStore";
 import type { FileEntry, FileTypeCategory } from "../types";
+import { useT } from "../hooks/useT";
 
 type PageTab = "types" | "age";
 type SortKey = "size" | "count" | "name";
 
-const TYPE_META: Record<FileTypeCategory, { label: string; icon: string; color: string }> = {
-  video:      { label: "视频",     icon: "videocam",                 color: "#06b6d4" },
-  image:      { label: "图片",     icon: "image",                    color: "#ec4899" },
-  audio:      { label: "音频",     icon: "music_note",               color: "#a855f7" },
-  document:   { label: "文档",     icon: "description",              color: "#f59e0b" },
-  archive:    { label: "压缩包",   icon: "folder_zip",               color: "#8b5cf6" },
-  installer:  { label: "安装包",   icon: "install_desktop",          color: "#3b82f6" },
-  code:       { label: "代码",     icon: "code",                     color: "#10b981" },
-  database:   { label: "数据库",   icon: "database",                 color: "#f97316" },
-  design:     { label: "设计文件", icon: "palette",                  color: "#e879f9" },
-  model:      { label: "3D 模型",  icon: "view_in_ar",               color: "#14b8a6" },
-  font:       { label: "字体",     icon: "font_download",            color: "#84cc16" },
-  disk_image: { label: "磁盘镜像", icon: "album",                    color: "#64748b" },
-  system:     { label: "系统文件", icon: "settings_system_daydream", color: "#94a3b8" },
-  cache:      { label: "缓存",     icon: "cached",                   color: "#6b7280" },
-  unknown:    { label: "未知",     icon: "help_outline",             color: "#a9b4b9" },
+const TYPE_META: Record<FileTypeCategory, { icon: string; color: string }> = {
+  video:      { icon: "videocam",                 color: "#06b6d4" },
+  image:      { icon: "image",                    color: "#ec4899" },
+  audio:      { icon: "music_note",               color: "#a855f7" },
+  document:   { icon: "description",              color: "#f59e0b" },
+  archive:    { icon: "folder_zip",               color: "#8b5cf6" },
+  installer:  { icon: "install_desktop",          color: "#3b82f6" },
+  code:       { icon: "code",                     color: "#10b981" },
+  database:   { icon: "database",                 color: "#f97316" },
+  design:     { icon: "palette",                  color: "#e879f9" },
+  model:      { icon: "view_in_ar",               color: "#14b8a6" },
+  font:       { icon: "font_download",            color: "#84cc16" },
+  disk_image: { icon: "album",                    color: "#64748b" },
+  system:     { icon: "settings_system_daydream", color: "#94a3b8" },
+  cache:      { icon: "cached",                   color: "#6b7280" },
+  unknown:    { icon: "help_outline",             color: "#a9b4b9" },
 };
 
+function getTypeLabel(cat: FileTypeCategory, t: ReturnType<typeof useT>): string {
+  const map: Record<FileTypeCategory, string> = {
+    video:      t.fileTypes.typeVideo,
+    image:      t.fileTypes.typeImage,
+    audio:      t.fileTypes.typeAudio,
+    document:   t.fileTypes.typeDocument,
+    archive:    t.fileTypes.typeArchive,
+    installer:  t.fileTypes.typeInstaller,
+    code:       t.fileTypes.typeCode,
+    database:   t.fileTypes.typeDatabase,
+    design:     t.fileTypes.typeDesign,
+    model:      t.fileTypes.typeModel,
+    font:       t.fileTypes.typeFont,
+    disk_image: t.fileTypes.typeDiskImage,
+    system:     t.fileTypes.typeSystem,
+    cache:      t.fileTypes.typeCache,
+    unknown:    t.fileTypes.typeUnknown,
+  };
+  return map[cat];
+}
+
+function getAgeBuckets(t: ReturnType<typeof useT>) {
+  return [
+    { label: t.fileTypes.ageThisWeek,   color: "#0053db", maxAge: 7 * 86400_000 },
+    { label: t.fileTypes.ageThisMonth,  color: "#3b82f6", maxAge: 30 * 86400_000 },
+    { label: t.fileTypes.age3Months,    color: "#60a5fa", maxAge: 90 * 86400_000 },
+    { label: t.fileTypes.age1Year,      color: "#93c5fd", maxAge: 365 * 86400_000 },
+    { label: t.fileTypes.age1to3Years,  color: "#f59e0b", maxAge: 3 * 365 * 86400_000 },
+    { label: t.fileTypes.age3PlusYears, color: "#ef4444", maxAge: Infinity },
+  ];
+}
+
 const NOW = Date.now();
-const AGE_BUCKETS = [
-  { label: "本周内",   color: "#0053db", maxAge: 7 * 86400_000 },
-  { label: "本月内",   color: "#3b82f6", maxAge: 30 * 86400_000 },
-  { label: "3 个月内", color: "#60a5fa", maxAge: 90 * 86400_000 },
-  { label: "1 年内",   color: "#93c5fd", maxAge: 365 * 86400_000 },
-  { label: "1–3 年",   color: "#f59e0b", maxAge: 3 * 365 * 86400_000 },
-  { label: "3 年以上", color: "#ef4444", maxAge: Infinity },
-];
 
 function formatBytes(b: number) {
   if (b < 1e6) return `${(b / 1e3).toFixed(0)} KB`;
@@ -60,10 +85,10 @@ function topDirs(files: FileEntry[], n = 3): { dir: string; size: number }[] {
 
 interface ExtRow { ext: string; size: number; count: number }
 
-function buildExtBreakdown(files: FileEntry[]): ExtRow[] {
+function buildExtBreakdown(files: FileEntry[], noExtLabel: string): ExtRow[] {
   const map = new Map<string, { size: number; count: number }>();
   for (const f of files) {
-    const ext = f.ext ? `.${f.ext.toLowerCase()}` : "(无扩展名)";
+    const ext = f.ext ? `.${f.ext.toLowerCase()}` : noExtLabel;
     const cur = map.get(ext) ?? { size: 0, count: 0 };
     cur.size += f.size; cur.count += 1;
     map.set(ext, cur);
@@ -82,8 +107,8 @@ function buildTypeGroups(files: FileEntry[]): TypeGroup[] {
     .sort((a, b) => b.totalSize - a.totalSize);
 }
 
-function buildAgeGroups(files: FileEntry[]): AgeGroup[] {
-  const buckets = AGE_BUCKETS.map((b) => ({ ...b, totalSize: 0, count: 0, files: [] as FileEntry[] }));
+function buildAgeGroups(files: FileEntry[], ageBuckets: ReturnType<typeof getAgeBuckets>): AgeGroup[] {
+  const buckets = ageBuckets.map((b) => ({ ...b, totalSize: 0, count: 0, files: [] as FileEntry[] }));
   for (const f of files) {
     const age = NOW - f.modifiedAt;
     const bucket = buckets.find((b) => age <= b.maxAge) ?? buckets[buckets.length - 1];
@@ -95,9 +120,10 @@ function buildAgeGroups(files: FileEntry[]): AgeGroup[] {
 
 // ── ExtBreakdown ─────────────────────────────────────────────────────────────
 
-function ExtBreakdown({ files, color }: { files: FileEntry[]; color: string }) {
+function ExtBreakdown({ files, color, noExtLabel }: { files: FileEntry[]; color: string; noExtLabel: string }) {
+  const t = useT();
   const [showAll, setShowAll] = useState(false);
-  const rows = buildExtBreakdown(files);
+  const rows = buildExtBreakdown(files, noExtLabel);
   const maxSize = rows[0]?.size ?? 1;
   const visible = showAll ? rows : rows.slice(0, 6);
   return (
@@ -110,13 +136,13 @@ function ExtBreakdown({ files, color }: { files: FileEntry[]; color: string }) {
               <div className="h-full rounded-full" style={{ width: `${(r.size / maxSize) * 100}%`, background: color }} />
             </div>
             <span className="text-[10px] text-on-surface-variant/60 w-14 text-right shrink-0">{formatBytes(r.size)}</span>
-            <span className="text-[10px] text-on-surface-variant/40 w-10 text-right shrink-0">{r.count} 个</span>
+            <span className="text-[10px] text-on-surface-variant/40 w-10 text-right shrink-0">{r.count} {t.fileTypes.files}</span>
           </div>
         ))}
       </div>
       {rows.length > 6 && (
         <button onClick={() => setShowAll((v) => !v)} className="mt-1.5 text-[10px] font-bold text-primary hover:underline">
-          {showAll ? "收起" : `+${rows.length - 6} 种扩展名`}
+          {showAll ? t.fileTypes.collapse : t.fileTypes.moreExts(rows.length - 6)}
         </button>
       )}
     </div>
@@ -126,6 +152,7 @@ function ExtBreakdown({ files, color }: { files: FileEntry[]; color: string }) {
 // ── FileList ─────────────────────────────────────────────────────────────────
 
 function FileList({ files, selected, onToggle, limit = 8 }: { files: FileEntry[]; selected: Set<string>; onToggle: (p: string) => void; limit?: number }) {
+  const t = useT();
   const [showAll, setShowAll] = useState(false);
   const visible = showAll ? files : files.slice(0, limit);
   return (
@@ -146,7 +173,7 @@ function FileList({ files, selected, onToggle, limit = 8 }: { files: FileEntry[]
               </div>
               <span className="text-xs text-on-surface-variant/60 shrink-0">{formatBytes(f.size)}</span>
               <button onClick={(e) => { e.stopPropagation(); revealItemInDir(f.path).catch(() => {}); }}
-                title="在文件管理器中打开" className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 shrink-0">
+                title={t.fileTypes.revealInExplorer} className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 shrink-0">
                 <span className="material-symbols-outlined text-[14px] text-on-surface-variant/50 hover:text-primary transition-colors">open_in_new</span>
               </button>
             </div>
@@ -155,7 +182,7 @@ function FileList({ files, selected, onToggle, limit = 8 }: { files: FileEntry[]
       </div>
       {files.length > limit && (
         <button onClick={() => setShowAll((v) => !v)} className="mt-1.5 text-[10px] font-bold text-primary hover:underline">
-          {showAll ? "收起" : `查看全部 ${files.length.toLocaleString()} 个文件`}
+          {showAll ? t.fileTypes.collapse : t.fileTypes.viewAll(files.length)}
         </button>
       )}
     </div>
@@ -168,8 +195,10 @@ function TypeCard({ group, totalSize, selected, onToggle, onToggleAll }: {
   group: TypeGroup; totalSize: number; selected: Set<string>;
   onToggle: (p: string) => void; onToggleAll: (ps: string[]) => void;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const meta = TYPE_META[group.category];
+  const label = getTypeLabel(group.category, t);
   const pct = totalSize > 0 ? (group.totalSize / totalSize) * 100 : 0;
   const paths = group.files.map((f) => f.path);
   const allSel = paths.length > 0 && paths.every((p) => selected.has(p));
@@ -180,7 +209,7 @@ function TypeCard({ group, totalSize, selected, onToggle, onToggleAll }: {
     <div className={["bg-surface-container-lowest rounded-xl border overflow-hidden transition-all", anySel ? "border-primary/40 bg-primary/5" : "border-outline-variant/10"].join(" ")}>
       <div className="flex items-center gap-3 p-4">
         <div className="shrink-0 flex items-center justify-center w-10 h-10 -ml-2 -my-2 rounded-lg cursor-pointer hover:bg-surface-container-high transition-colors"
-          onClick={() => onToggleAll(paths)} title={allSel ? "取消全选" : "全选此类"}>
+          onClick={() => onToggleAll(paths)} title={allSel ? t.fileTypes.deselectAll : t.fileTypes.selectAllCategory}>
           <span className={["material-symbols-outlined text-[22px] transition-colors", anySel ? "text-primary" : "text-on-surface-variant/30 hover:text-on-surface-variant"].join(" ")}>
             {allSel ? "check_circle" : anySel ? "indeterminate_check_box" : "radio_button_unchecked"}
           </span>
@@ -190,9 +219,9 @@ function TypeCard({ group, totalSize, selected, onToggle, onToggleAll }: {
         </div>
         <button onClick={() => setOpen((v) => !v)} className="flex-1 min-w-0 text-left">
           <div className="flex items-center justify-between mb-1.5">
-            <p className="text-sm font-semibold text-on-surface">{meta.label}</p>
+            <p className="text-sm font-semibold text-on-surface">{label}</p>
             <div className="flex items-center gap-3">
-              <span className="text-xs text-on-surface-variant">{group.count.toLocaleString()} 个</span>
+              <span className="text-xs text-on-surface-variant">{group.count.toLocaleString()} {t.fileTypes.files}</span>
               <span className="text-sm font-bold text-on-surface">{formatBytes(group.totalSize)}</span>
               <span className="text-xs font-bold text-on-surface-variant/60 w-10 text-right">{pct.toFixed(1)}%</span>
             </div>
@@ -207,12 +236,12 @@ function TypeCard({ group, totalSize, selected, onToggle, onToggleAll }: {
       {open && (
         <div className="border-t border-outline-variant/10 px-5 py-4 space-y-4">
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/60 mb-2">扩展名分布</p>
-            <ExtBreakdown files={group.files} color={meta.color} />
+            <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/60 mb-2">{t.fileTypes.extBreakdown}</p>
+            <ExtBreakdown files={group.files} color={meta.color} noExtLabel={t.fileTypes.noExt} />
           </div>
           {dirs.length > 0 && (
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/60 mb-2">主要目录</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/60 mb-2">{t.fileTypes.topDirs}</p>
               <div className="space-y-1">
                 {dirs.map((d) => (
                   <div key={d.dir} className="flex items-center gap-2">
@@ -226,9 +255,9 @@ function TypeCard({ group, totalSize, selected, onToggle, onToggleAll }: {
           )}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/60">文件列表</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/60">{t.fileTypes.fileList}</p>
               <button onClick={() => onToggleAll(paths)} className="text-[10px] font-bold text-primary hover:underline">
-                {allSel ? "取消全选" : "全选"}
+                {allSel ? t.fileTypes.deselectAll : t.fileTypes.selectAll}
               </button>
             </div>
             <FileList files={group.files} selected={selected} onToggle={onToggle} />
@@ -245,6 +274,7 @@ function AgeCard({ group, totalSize, selected, onToggle, onToggleAll }: {
   group: AgeGroup; totalSize: number; selected: Set<string>;
   onToggle: (p: string) => void; onToggleAll: (ps: string[]) => void;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const pct = totalSize > 0 ? (group.totalSize / totalSize) * 100 : 0;
   const paths = group.files.map((f) => f.path);
@@ -265,7 +295,7 @@ function AgeCard({ group, totalSize, selected, onToggle, onToggleAll }: {
           <div className="flex items-center justify-between mb-1.5">
             <p className="text-sm font-semibold text-on-surface">{group.label}</p>
             <div className="flex items-center gap-3">
-              <span className="text-xs text-on-surface-variant">{group.count.toLocaleString()} 个</span>
+              <span className="text-xs text-on-surface-variant">{group.count.toLocaleString()} {t.fileTypes.files}</span>
               <span className="text-sm font-bold text-on-surface">{formatBytes(group.totalSize)}</span>
               <span className="text-xs font-bold text-on-surface-variant/60 w-10 text-right">{pct.toFixed(1)}%</span>
             </div>
@@ -280,9 +310,9 @@ function AgeCard({ group, totalSize, selected, onToggle, onToggleAll }: {
       {open && (
         <div className="border-t border-outline-variant/10 px-5 py-4">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/60">文件列表</p>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/60">{t.fileTypes.fileList}</p>
             <button onClick={() => onToggleAll(paths)} className="text-[10px] font-bold text-primary hover:underline">
-              {allSel ? "取消全选" : "全选"}
+              {allSel ? t.fileTypes.deselectAll : t.fileTypes.selectAll}
             </button>
           </div>
           <FileList files={group.files} selected={selected} onToggle={onToggle} />
@@ -295,6 +325,7 @@ function AgeCard({ group, totalSize, selected, onToggle, onToggleAll }: {
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function FileTypesPage() {
+  const t = useT();
   const result = useAppStore((s) => s.session.result);
   const [activeTab, setActiveTab] = useState<PageTab>("types");
   const [sortBy, setSortBy] = useState<SortKey>("size");
@@ -302,6 +333,8 @@ export default function FileTypesPage() {
   const [deletedPaths, setDeletedPaths] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [deleteProgress, setDeleteProgress] = useState<{ done: number; total: number } | null>(null);
+
+  const ageBuckets = useMemo(() => getAgeBuckets(t), [t]);
 
   const allFiles = useMemo(
     () => result ? collectFiles(result.tree).filter((f) => !deletedPaths.has(f.path)) : [],
@@ -312,11 +345,11 @@ export default function FileTypesPage() {
   const typeGroups = useMemo(() => {
     const groups = buildTypeGroups(allFiles);
     if (sortBy === "count") return [...groups].sort((a, b) => b.count - a.count);
-    if (sortBy === "name") return [...groups].sort((a, b) => TYPE_META[a.category].label.localeCompare(TYPE_META[b.category].label, "zh"));
+    if (sortBy === "name") return [...groups].sort((a, b) => getTypeLabel(a.category, t).localeCompare(getTypeLabel(b.category, t), "zh"));
     return groups;
-  }, [allFiles, sortBy]);
+  }, [allFiles, sortBy, t]);
 
-  const ageGroups = useMemo(() => buildAgeGroups(allFiles), [allFiles]);
+  const ageGroups = useMemo(() => buildAgeGroups(allFiles, ageBuckets), [allFiles, ageBuckets]);
 
   const toggleItem = useCallback((path: string) => {
     setSelected((prev) => { const next = new Set(prev); next.has(path) ? next.delete(path) : next.add(path); return next; });
@@ -362,8 +395,8 @@ export default function FileTypesPage() {
         <div className="w-20 h-20 rounded-3xl bg-primary/10 flex items-center justify-center mb-6 shadow-inner">
           <span className="material-symbols-outlined text-primary text-4xl">category</span>
         </div>
-        <h2 className="font-headline text-xl font-extrabold text-on-surface mb-2">先完成一次扫描</h2>
-        <p className="text-sm text-on-surface-variant max-w-xs">请先在「透视」页面扫描文件夹，然后回到这里查看文件类型分布。</p>
+        <h2 className="font-headline text-xl font-extrabold text-on-surface mb-2">{t.fileTypes.emptyTitle}</h2>
+        <p className="text-sm text-on-surface-variant max-w-xs">{t.fileTypes.emptyDesc}</p>
       </div>
     );
   }
@@ -373,22 +406,22 @@ export default function FileTypesPage() {
       <div className="px-8 pt-6 pb-0 shrink-0">
         <div className="flex items-end justify-between mb-4">
           <div>
-            <h2 className="font-headline text-2xl font-extrabold text-on-surface tracking-tight">文件类型</h2>
-            <p className="text-sm text-on-surface-variant mt-1">{allFiles.length.toLocaleString()} 个文件 · {formatBytes(totalSize)}</p>
+            <h2 className="font-headline text-2xl font-extrabold text-on-surface tracking-tight">{t.fileTypes.title}</h2>
+            <p className="text-sm text-on-surface-variant mt-1">{allFiles.length.toLocaleString()} {t.fileTypes.files} · {formatBytes(totalSize)}</p>
           </div>
           {activeTab === "types" && (
             <div className="flex items-center gap-1 bg-surface-container-low rounded-lg p-1">
               {(["size", "count", "name"] as SortKey[]).map((k) => (
                 <button key={k} onClick={() => setSortBy(k)}
                   className={["px-3 py-1 rounded-md text-xs font-semibold transition-colors", sortBy === k ? "bg-surface text-on-surface shadow-sm" : "text-on-surface-variant hover:text-on-surface"].join(" ")}>
-                  {{ size: "大小", count: "文件数", name: "名称" }[k]}
+                  {{ size: t.fileTypes.sortSize, count: t.fileTypes.sortCount, name: t.fileTypes.sortName }[k]}
                 </button>
               ))}
             </div>
           )}
         </div>
         <div className="flex items-center gap-1 border-b border-outline-variant/20">
-          {([["types", "category", "按类型"], ["age", "schedule", "按时间"]] as const).map(([id, icon, label]) => (
+          {([["types", "category", t.fileTypes.byType], ["age", "schedule", t.fileTypes.byAge]] as const).map(([id, icon, label]) => (
             <button key={id} onClick={() => setActiveTab(id)}
               className={["flex items-center gap-2 px-5 py-2.5 text-sm font-semibold font-headline transition-all border-b-2 -mb-px", activeTab === id ? "border-primary text-primary" : "border-transparent text-on-surface-variant hover:text-on-surface"].join(" ")}>
               <span className="material-symbols-outlined text-[18px]">{icon}</span>{label}
@@ -400,13 +433,13 @@ export default function FileTypesPage() {
       <div className="flex-1 overflow-y-auto px-8 py-6 pb-28 space-y-2">
         {activeTab === "types" ? (
           typeGroups.length === 0
-            ? <p className="text-sm text-on-surface-variant/60 text-center py-12">无文件数据</p>
+            ? <p className="text-sm text-on-surface-variant/60 text-center py-12">{t.fileTypes.noData}</p>
             : typeGroups.map((g) => <TypeCard key={g.category} group={g} totalSize={totalSize} selected={selected} onToggle={toggleItem} onToggleAll={toggleAll} />)
         ) : (
           ageGroups.length === 0
-            ? <p className="text-sm text-on-surface-variant/60 text-center py-12">无文件数据</p>
+            ? <p className="text-sm text-on-surface-variant/60 text-center py-12">{t.fileTypes.noData}</p>
             : <>
-                <p className="text-xs text-on-surface-variant/60 mb-3">基于文件最后修改时间（mtime）。</p>
+                <p className="text-xs text-on-surface-variant/60 mb-3">{t.fileTypes.ageMtimeNote}</p>
                 {ageGroups.map((g) => <AgeCard key={g.label} group={g} totalSize={totalSize} selected={selected} onToggle={toggleItem} onToggleAll={toggleAll} />)}
               </>
         )}
@@ -417,8 +450,8 @@ export default function FileTypesPage() {
           {deleting && deleteProgress ? (
             <div className="flex items-center gap-5">
               <div>
-                <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">正在移到回收站</p>
-                <p className="font-headline text-lg font-extrabold text-on-surface">{deleteProgress.done} / {deleteProgress.total} 个文件</p>
+                <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">{t.fileTypes.movingToTrash}</p>
+                <p className="font-headline text-lg font-extrabold text-on-surface">{deleteProgress.done} / {deleteProgress.total} {t.fileTypes.files}</p>
               </div>
               <div className="w-40">
                 <div className="h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
@@ -433,15 +466,15 @@ export default function FileTypesPage() {
           ) : (
             <>
               <div>
-                <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">已选中</p>
-                <p className="font-headline text-lg font-extrabold text-on-surface">{selected.size.toLocaleString()} 个文件</p>
+                <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">{t.fileTypes.selectedFiles}</p>
+                <p className="font-headline text-lg font-extrabold text-on-surface">{selected.size.toLocaleString()} {t.fileTypes.files}</p>
               </div>
               <div className="flex items-center gap-3">
                 <button onClick={() => setSelected(new Set())}
-                  className="px-5 py-2.5 rounded-lg text-sm font-semibold text-on-surface-variant hover:bg-surface-container-high transition-colors">取消</button>
+                  className="px-5 py-2.5 rounded-lg text-sm font-semibold text-on-surface-variant hover:bg-surface-container-high transition-colors">{t.fileTypes.cancel}</button>
                 <button onClick={handleDelete} disabled={deleting}
                   className="cta-gradient px-7 py-2.5 rounded-lg text-sm font-bold text-on-primary shadow-lg shadow-primary/20 flex items-center gap-2 active:scale-95 duration-150 disabled:opacity-60">
-                  <span className="material-symbols-outlined text-[18px]">delete_sweep</span>移到回收站
+                  <span className="material-symbols-outlined text-[18px]">delete_sweep</span>{t.fileTypes.moveToTrash}
                 </button>
               </div>
             </>

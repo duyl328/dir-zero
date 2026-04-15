@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import ContextMenu from "../ui/ContextMenu";
 import { useToast } from "../../hooks/useToast";
+import { useT } from "../../hooks/useT";
 import type { ResidueGroup, StoredCustomRule } from "../../analysis/residueAnalysis";
 import type { FileEntry } from "../../types";
 
@@ -28,6 +29,7 @@ function AddRuleForm({ onAdd, onCancel }: {
   onAdd: (rule: StoredCustomRule) => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   const [label, setLabel] = useState("");
   const [pattern, setPattern] = useState("");
   const [useRegex, setUseRegex] = useState(false);
@@ -36,23 +38,23 @@ function AddRuleForm({ onAdd, onCancel }: {
   function handleSubmit() {
     const p = pattern.trim();
     const l = label.trim() || p;
-    if (!p) { setError("请输入匹配规则"); return; }
+    if (!p) { setError(t.residue.ruleFormPlaceholder); return; }
     if (useRegex) {
-      try { new RegExp(p); } catch { setError("正则表达式无效"); return; }
+      try { new RegExp(p); } catch { setError(t.residue.invalidRegex); return; }
     }
     onAdd({ id: `custom-${Date.now()}`, label: l, pattern: p, useRegex, enabled: true });
   }
 
   return (
     <div className="bg-surface-container-lowest rounded-xl border border-primary/30 p-4 space-y-3">
-      <p className="text-xs font-bold text-on-surface">添加自定义规则</p>
+      <p className="text-xs font-bold text-on-surface">{t.residue.ruleFormTitle}</p>
       <div className="flex gap-2">
         <div className="flex-1">
           <input
             type="text" value={pattern} autoFocus
             onChange={(e) => { setPattern(e.target.value); setError(""); }}
             onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-            placeholder={useRegex ? "正则表达式，如 ^~\\$.*" : "glob 模式，如 *.bak 或 thumbs.db"}
+            placeholder={useRegex ? t.residue.regexPlaceholder : t.residue.globPlaceholder}
             className={[
               "w-full px-3 py-2 rounded-lg bg-surface-container text-xs text-on-surface outline-none",
               "placeholder:text-on-surface-variant/40 focus:ring-1 transition-all",
@@ -64,7 +66,7 @@ function AddRuleForm({ onAdd, onCancel }: {
         </div>
         <button
           onClick={() => setUseRegex((v) => !v)}
-          title={useRegex ? "切换为 glob 模式" : "切换为正则模式"}
+          title={useRegex ? t.residue.switchToGlob : t.residue.switchToRegex}
           className={[
             "px-2.5 py-2 rounded-lg text-[10px] font-bold font-mono transition-all shrink-0",
             useRegex ? "bg-amber-400/20 text-amber-600" : "bg-surface-container text-on-surface-variant hover:text-on-surface",
@@ -73,12 +75,12 @@ function AddRuleForm({ onAdd, onCancel }: {
       </div>
       <input
         type="text" value={label} onChange={(e) => setLabel(e.target.value)}
-        placeholder="规则名称（可选）"
+        placeholder={t.residue.ruleNamePlaceholder}
         className="w-full px-3 py-2 rounded-lg bg-surface-container text-xs text-on-surface outline-none placeholder:text-on-surface-variant/40 focus:ring-1 focus:ring-primary/50 transition-all"
       />
       <div className="flex gap-2 justify-end">
-        <button onClick={onCancel} className="px-4 py-1.5 rounded-lg text-xs font-semibold text-on-surface-variant hover:bg-surface-container-high transition-colors">取消</button>
-        <button onClick={handleSubmit} className="px-4 py-1.5 rounded-lg text-xs font-bold bg-primary text-on-primary hover:opacity-90 transition-opacity">添加</button>
+        <button onClick={onCancel} className="px-4 py-1.5 rounded-lg text-xs font-semibold text-on-surface-variant hover:bg-surface-container-high transition-colors">{t.residue.cancel}</button>
+        <button onClick={handleSubmit} className="px-4 py-1.5 rounded-lg text-xs font-bold bg-primary text-on-primary hover:opacity-90 transition-opacity">{t.residue.add}</button>
       </div>
     </div>
   );
@@ -87,6 +89,7 @@ function AddRuleForm({ onAdd, onCancel }: {
 interface CtxState { x: number; y: number; file: FileEntry }
 
 export default function ResidueTab({ groups: initialGroups, customRules, onRefresh, onAddRule, onToggleRule, onRemoveRule, onDeleted, onDeleteStart, onDeleteComplete }: Props) {
+  const t = useT();
   const groups = initialGroups;
   const { show: showToast, ToastContainer } = useToast();
   const [selected, setSelected] = useState<Set<string>>(
@@ -170,11 +173,11 @@ export default function ResidueTab({ groups: initialGroups, customRules, onRefre
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
         <span className="material-symbols-outlined text-4xl text-tertiary/60">check_circle</span>
-        <p className="text-sm font-bold text-on-surface">未发现残留文件</p>
-        <p className="text-xs text-on-surface-variant/60 mb-4">没有匹配内置规则的垃圾文件</p>
+        <p className="text-sm font-bold text-on-surface">{t.residue.emptyTitle}</p>
+        <p className="text-xs text-on-surface-variant/60 mb-4">{t.residue.emptyDesc}</p>
         <button onClick={() => setShowAddForm(true)} className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold text-primary bg-primary/10 hover:bg-primary/15 transition-colors">
           <span className="material-symbols-outlined text-[15px]">add</span>
-          添加自定义规则
+          {t.residue.addCustomRule}
         </button>
       </div>
     );
@@ -188,9 +191,9 @@ export default function ResidueTab({ groups: initialGroups, customRules, onRefre
             onClick={() => setSelected(selected.size === visibleGroups.length ? new Set() : new Set(visibleGroups.map((g) => g.ruleId)))}
             className="text-[10px] font-bold text-primary hover:underline"
           >
-            {selected.size === visibleGroups.length ? "取消全选" : "全选"}
+            {selected.size === visibleGroups.length ? t.residue.deselect : t.residue.selectRule}
           </button>
-          <span className="text-[10px] text-on-surface-variant/50">已选 {selected.size} / {visibleGroups.length} 类规则</span>
+          <span className="text-[10px] text-on-surface-variant/50">{t.residue.selected} {selected.size} / {visibleGroups.length} {t.residue.ruleTypes}</span>
         </div>
       )}
 
@@ -215,7 +218,7 @@ export default function ResidueTab({ groups: initialGroups, customRules, onRefre
                 <div
                   className="shrink-0 flex items-center justify-center w-10 h-10 -ml-2 -my-2 rounded-lg cursor-pointer hover:bg-surface-container-high transition-colors"
                   onClick={(e) => { e.stopPropagation(); toggleSelect(group.ruleId); }}
-                  title={isSelected ? "取消选中" : "选中此规则"}
+                  title={isSelected ? t.residue.deselect : t.residue.selectRule}
                 >
                   <span className={[
                     "material-symbols-outlined text-[22px] transition-colors",
@@ -238,7 +241,7 @@ export default function ResidueTab({ groups: initialGroups, customRules, onRefre
                   <p className="text-sm font-semibold text-on-surface leading-tight">{group.label}</p>
                   <p className="text-xs text-on-surface-variant mt-0.5 leading-snug">{group.desc}</p>
                   <p className="text-[10px] font-bold text-on-surface-variant/60 mt-1">
-                    {group.files.length.toLocaleString()} 个文件 · {formatBytes(group.totalSize)}
+                    {group.files.length.toLocaleString()} {t.residue.files} · {formatBytes(group.totalSize)}
                   </p>
                 </div>
 
@@ -263,7 +266,7 @@ export default function ResidueTab({ groups: initialGroups, customRules, onRefre
                       <span className="text-[10px] font-bold text-on-surface-variant/60 shrink-0">{formatBytes(f.size)}</span>
                       <button
                         onClick={() => revealItemInDir(f.path).catch(() => {})}
-                        title="在文件管理器中打开"
+                        title={t.residue.revealInExplorer}
                         className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5"
                       >
                         <span className="material-symbols-outlined text-[14px] text-on-surface-variant/50 hover:text-primary transition-colors">open_in_new</span>
@@ -285,7 +288,7 @@ export default function ResidueTab({ groups: initialGroups, customRules, onRefre
             className="flex items-center gap-2 text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-widest hover:text-on-surface-variant transition-colors mb-2"
           >
             <span className="material-symbols-outlined text-[14px]">{showExcluded ? "expand_less" : "expand_more"}</span>
-            已排除 {excluded.size} 个文件
+            {t.residue.excluded} {excluded.size} {t.residue.files}
           </button>
           {showExcluded && (
             <div className="rounded-xl border border-outline-variant/10 bg-surface-container-lowest overflow-hidden">
@@ -303,7 +306,7 @@ export default function ResidueTab({ groups: initialGroups, customRules, onRefre
                       className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-primary hover:bg-primary/10"
                     >
                       <span className="material-symbols-outlined text-[13px]">undo</span>
-                      恢复
+                      {t.residue.restore}
                     </button>
                   </div>
                 );
@@ -313,7 +316,7 @@ export default function ResidueTab({ groups: initialGroups, customRules, onRefre
                   onClick={() => setExcluded(new Set())}
                   className="text-[10px] font-bold text-on-surface-variant/50 hover:text-error transition-colors"
                 >
-                  清空白名单
+                  {t.residue.clearWhitelist}
                 </button>
               </div>
             </div>
@@ -324,14 +327,14 @@ export default function ResidueTab({ groups: initialGroups, customRules, onRefre
       {/* Custom rules — always visible section */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-2">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/50">自定义规则</p>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/50">{t.residue.customRules}</p>
           {!showAddForm && (
             <button
               onClick={() => setShowAddForm(true)}
               className="flex items-center gap-1 text-[10px] font-bold text-primary hover:underline"
             >
               <span className="material-symbols-outlined text-[13px]">add</span>
-              添加
+              {t.residue.add}
             </button>
           )}
         </div>
@@ -346,7 +349,7 @@ export default function ResidueTab({ groups: initialGroups, customRules, onRefre
         )}
 
         {customRules.length === 0 && !showAddForm ? (
-          <p className="text-xs text-on-surface-variant/40 py-2">暂无自定义规则</p>
+          <p className="text-xs text-on-surface-variant/40 py-2">{t.residue.noCustomRules}</p>
         ) : customRules.length > 0 ? (
           <div className="rounded-xl border border-outline-variant/10 bg-surface-container-lowest overflow-hidden">
             {customRules.map((rule) => (
@@ -358,13 +361,13 @@ export default function ResidueTab({ groups: initialGroups, customRules, onRefre
                   </p>
                   <p className="text-[10px] font-mono text-on-surface-variant/40 truncate">
                     {rule.useRegex ? "regex: " : ""}{rule.pattern}
-                    {!rule.enabled && <span className="ml-1 not-italic font-sans">· 已禁用</span>}
+                    {!rule.enabled && <span className="ml-1 not-italic font-sans">· {t.residue.disabled}</span>}
                   </p>
                 </div>
                 {/* Toggle */}
                 <button
                   onClick={() => onToggleRule(rule.id)}
-                  title={rule.enabled ? "点击禁用" : "点击启用"}
+                  title={rule.enabled ? t.residue.clickToDisable : t.residue.clickToEnable}
                   className={[
                     "shrink-0 rounded-full transition-colors overflow-hidden relative flex-none",
                     rule.enabled ? "bg-primary" : "bg-surface-container-highest",
@@ -379,7 +382,7 @@ export default function ResidueTab({ groups: initialGroups, customRules, onRefre
                 {/* Delete */}
                 <button
                   onClick={() => onRemoveRule(rule.id)}
-                  title="删除规则"
+                  title={t.residue.deleteRule}
                   className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 shrink-0"
                 >
                   <span className="material-symbols-outlined text-[15px] text-on-surface-variant/50 hover:text-error transition-colors">delete_outline</span>
@@ -395,9 +398,9 @@ export default function ResidueTab({ groups: initialGroups, customRules, onRefre
           {deleting && deleteProgress ? (
             <div className="flex items-center gap-5">
               <div>
-                <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">正在移到回收站</p>
+                <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">{t.residue.movingToTrash}</p>
                 <p className="font-headline text-lg font-extrabold text-on-surface">
-                  {deleteProgress.done} / {deleteProgress.total} 个文件
+                  {deleteProgress.done} / {deleteProgress.total} {t.residue.files}
                 </p>
               </div>
               <div className="w-40">
@@ -415,9 +418,9 @@ export default function ResidueTab({ groups: initialGroups, customRules, onRefre
           ) : (
             <>
               <div>
-                <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">已选中</p>
+                <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">{t.residue.selectedFiles}</p>
                 <p className="font-headline text-lg font-extrabold text-on-surface">
-                  {formatBytes(totalSize)} · {totalCount.toLocaleString()} 个文件
+                  {formatBytes(totalSize)} · {totalCount.toLocaleString()} {t.residue.files}
                 </p>
               </div>
               <button
@@ -425,7 +428,7 @@ export default function ResidueTab({ groups: initialGroups, customRules, onRefre
                 className="cta-gradient px-7 py-2.5 rounded-lg text-sm font-bold text-on-primary shadow-lg shadow-primary/20 flex items-center gap-2 active:scale-95 duration-150 disabled:opacity-60"
               >
                 <span className="material-symbols-outlined text-[18px]">delete_sweep</span>
-                移到回收站
+                {t.residue.moveToTrash}
               </button>
             </>
           )}
@@ -439,29 +442,29 @@ export default function ResidueTab({ groups: initialGroups, customRules, onRefre
           onClose={() => setCtx(null)}
           items={[
             {
-              label: "复制文件名",
+              label: t.residue.copyName,
               icon: "file_copy",
-              onClick: () => { navigator.clipboard.writeText(ctx.file.name); showToast("已复制文件名"); },
+              onClick: () => { navigator.clipboard.writeText(ctx.file.name); showToast(t.residue.copiedName); },
             },
             {
-              label: "复制完整路径",
+              label: t.residue.copyPath,
               icon: "content_copy",
-              onClick: () => { navigator.clipboard.writeText(ctx.file.path); showToast("已复制完整路径"); },
+              onClick: () => { navigator.clipboard.writeText(ctx.file.path); showToast(t.residue.copiedPath); },
             },
             {
-              label: "复制路径和文件名",
+              label: t.residue.copyPathAndName,
               icon: "copy_all",
-              onClick: () => { navigator.clipboard.writeText(ctx.file.path); showToast("已复制路径和文件名"); },
+              onClick: () => { navigator.clipboard.writeText(ctx.file.path); showToast(t.residue.copiedPathAndName); },
             },
             {
-              label: "在文件管理器中打开",
+              label: t.residue.revealInExplorer,
               icon: "folder_open",
               onClick: () => revealItemInDir(ctx.file.path).catch(() => {}),
             },
             {
-              label: "排除此文件（不再提示）",
+              label: t.residue.excludeFile,
               icon: "block",
-              onClick: () => { setExcluded((prev) => new Set([...prev, ctx.file.path])); showToast("已加入白名单", "block"); },
+              onClick: () => { setExcluded((prev) => new Set([...prev, ctx.file.path])); showToast(t.residue.addedToWhitelist, "block"); },
               danger: true,
             },
           ]}

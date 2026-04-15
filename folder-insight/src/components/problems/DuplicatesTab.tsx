@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import ContextMenu from "../ui/ContextMenu";
 import { useToast } from "../../hooks/useToast";
+import { useT } from "../../hooks/useT";
 import type { DuplicateCluster, FileEntry } from "../../types";
 
 type KeepStrategy = "newest" | "oldest" | "manual";
@@ -26,6 +27,7 @@ interface CtxState { x: number; y: number; file: FileEntry }
 
 export default function DuplicatesTab({ clusters, status, dupProgress, onScan, onCancel, onDeleted }: Props) {
   const { show: showToast, ToastContainer } = useToast();
+  const t = useT();
   const [strategy, setStrategy] = useState<KeepStrategy>("newest");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -42,9 +44,9 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan, o
           <span className="material-symbols-outlined text-primary text-3xl">file_copy</span>
         </div>
         <div>
-          <p className="text-sm font-bold text-on-surface mb-1">检测重复文件</p>
+          <p className="text-sm font-bold text-on-surface mb-1">{t.duplicates.emptyTitle}</p>
           <p className="text-xs text-on-surface-variant max-w-xs">
-            通过计算文件哈希值找出完全相同的文件。文件越多耗时越长，大文件夹可能需要几分钟。
+            {t.duplicates.emptyDesc}
           </p>
         </div>
         <button
@@ -52,7 +54,7 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan, o
           className="cta-gradient px-8 py-3 rounded-xl text-sm font-bold text-on-primary shadow-md flex items-center gap-2 active:scale-95 transition-all"
         >
           <span className="material-symbols-outlined text-[18px]">search</span>
-          开始扫描重复文件
+          {t.duplicates.startScan}
         </button>
       </div>
     );
@@ -71,11 +73,11 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan, o
         </div>
         <div>
           <p className="text-sm font-bold text-on-surface mb-1">
-            {status === "cancelling" ? "正在取消…" : "正在计算哈希值…"}
+            {status === "cancelling" ? t.duplicates.cancelling : t.duplicates.hashing}
           </p>
           {dupProgress && status === "scanning" && (
             <p className="text-xs text-on-surface-variant">
-              {dupProgress.processed.toLocaleString()} / {dupProgress.total.toLocaleString()} 个文件
+              {dupProgress.processed.toLocaleString()} / {dupProgress.total.toLocaleString()} {t.duplicates.files}
             </p>
           )}
         </div>
@@ -87,7 +89,7 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan, o
             onClick={onCancel}
             className="mt-2 px-5 py-2 rounded-lg text-xs font-semibold text-on-surface-variant hover:bg-surface-container-high transition-colors"
           >
-            取消
+            {t.duplicates.cancel}
           </button>
         )}
       </div>
@@ -98,8 +100,8 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan, o
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
         <span className="material-symbols-outlined text-4xl text-tertiary/60">check_circle</span>
-        <p className="text-sm font-bold text-on-surface">未发现重复文件</p>
-        <p className="text-xs text-on-surface-variant/60">所有文件内容唯一</p>
+        <p className="text-sm font-bold text-on-surface">{t.duplicates.noDuplicates}</p>
+        <p className="text-xs text-on-surface-variant/60">{t.duplicates.noDuplicatesDesc}</p>
       </div>
     );
   }
@@ -150,9 +152,9 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan, o
       setSelected(new Set());
 
       if (failed.length === 0) {
-        showToast(`已移到回收站 ${deletedSet.size} 个文件`, "check_circle");
+        showToast(t.duplicates.toastSuccess(deletedSet.size), "check_circle");
       } else {
-        showToast(`完成，${failed.length} 个文件失败`, "warning");
+        showToast(t.duplicates.toastFail(failed.length), "warning");
       }
     } finally {
       setDeleting(false);
@@ -170,7 +172,7 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan, o
     <div className="px-8 py-6 pb-28">
       {/* Strategy + select-all row */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
-        <p className="text-xs font-bold text-on-surface-variant uppercase tracking-widest shrink-0">保留策略：</p>
+        <p className="text-xs font-bold text-on-surface-variant uppercase tracking-widest shrink-0">{t.duplicates.keepStrategy}</p>
         {(["newest", "oldest", "manual"] as KeepStrategy[]).map((s) => (
           <button
             key={s}
@@ -182,7 +184,7 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan, o
                 : "bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest",
             ].join(" ")}
           >
-            {s === "newest" ? "保留最新" : s === "oldest" ? "保留最旧" : "手动选择"}
+            {s === "newest" ? t.duplicates.keepNewest : s === "oldest" ? t.duplicates.keepOldest : t.duplicates.keepManual}
           </button>
         ))}
         {clusters.length > 1 && (
@@ -190,14 +192,14 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan, o
             onClick={() => setSelected(selected.size === clusters.length ? new Set() : new Set(clusters.map((c) => c.id)))}
             className="ml-auto text-[10px] font-bold text-primary hover:underline"
           >
-            {selected.size === clusters.length ? "取消全选" : "全选"}
+            {selected.size === clusters.length ? t.duplicates.deselectAll : t.duplicates.selectAll}
           </button>
         )}
       </div>
 
       {strategy === "manual" && (
         <p className="text-[10px] text-on-surface-variant/60 mb-4 bg-surface-container-low rounded-lg px-3 py-2">
-          手动模式：展开后点击任意文件将其标记为保留，其余副本将被删除。
+          {t.duplicates.manualHint}
         </p>
       )}
 
@@ -224,7 +226,7 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan, o
                 <div
                   className="shrink-0 flex items-center justify-center w-10 h-10 -ml-2 -my-2 rounded-lg cursor-pointer hover:bg-surface-container-high transition-colors"
                   onClick={(e) => { e.stopPropagation(); toggleCluster(cluster.id); }}
-                  title={isSelected ? "取消选中" : "选中此组"}
+                  title={isSelected ? t.duplicates.deselect : t.duplicates.selectGroup}
                 >
                   <span className={[
                     "material-symbols-outlined text-[22px] transition-colors",
@@ -248,8 +250,8 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan, o
                     {cluster.files[0]?.name ?? "—"}
                   </p>
                   <p className="text-xs text-on-surface-variant mt-0.5">
-                    {cluster.files.length} 个副本 · {formatBytes(cluster.fileSize)} 每个 ·{" "}
-                    <span className="text-primary font-medium">{formatBytes(cluster.reclaimable)} 可回收</span>
+                    {cluster.files.length} {t.duplicates.copies} · {formatBytes(cluster.fileSize)} {t.duplicates.each} ·{" "}
+                    <span className="text-primary font-medium">{formatBytes(cluster.reclaimable)} {t.duplicates.reclaimable}</span>
                   </p>
                 </div>
 
@@ -295,12 +297,12 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan, o
                           </p>
                         </div>
                         {willKeep
-                          ? <span className="text-[10px] font-bold text-tertiary bg-tertiary/10 px-2 py-0.5 rounded-full shrink-0">保留</span>
-                          : <span className="text-[10px] font-bold text-error/60 shrink-0">删除</span>
+                          ? <span className="text-[10px] font-bold text-tertiary bg-tertiary/10 px-2 py-0.5 rounded-full shrink-0">{t.duplicates.keep}</span>
+                          : <span className="text-[10px] font-bold text-error/60 shrink-0">{t.duplicates.delete}</span>
                         }
                         <button
                           onClick={(e) => { e.stopPropagation(); revealItemInDir(f.path).catch(() => {}); }}
-                          title="在文件管理器中打开"
+                          title={t.duplicates.revealInExplorer}
                           className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 shrink-0"
                         >
                           <span className="material-symbols-outlined text-[14px] text-on-surface-variant/50 hover:text-primary transition-colors">open_in_new</span>
@@ -322,9 +324,9 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan, o
             /* Progress state */
             <div className="flex items-center gap-5">
               <div>
-                <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">正在移到回收站</p>
+                <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">{t.duplicates.movingToTrash}</p>
                 <p className="font-headline text-lg font-extrabold text-on-surface">
-                  {deleteProgress.done} / {deleteProgress.total} 个文件
+                  {deleteProgress.done} / {deleteProgress.total} {t.duplicates.files}
                 </p>
               </div>
               <div className="w-40">
@@ -343,9 +345,9 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan, o
             /* Normal state */
             <>
               <div>
-                <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">已选中</p>
+                <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">{t.duplicates.selected}</p>
                 <p className="font-headline text-lg font-extrabold text-on-surface">
-                  {formatBytes(totalSelected)} · {selected.size} 组
+                  {formatBytes(totalSelected)} · {selected.size} {t.duplicates.groups}
                 </p>
               </div>
               <div className="flex items-center gap-3">
@@ -353,14 +355,14 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan, o
                   onClick={() => setSelected(new Set())}
                   className="px-5 py-2.5 rounded-lg text-sm font-semibold text-on-surface-variant hover:bg-surface-container-high transition-colors"
                 >
-                  取消
+                  {t.duplicates.cancel}
                 </button>
                 <button
                   onClick={handleClean}
                   className="cta-gradient px-7 py-2.5 rounded-lg text-sm font-bold text-on-primary shadow-lg shadow-primary/20 flex items-center gap-2 active:scale-95 duration-150"
                 >
                   <span className="material-symbols-outlined text-[18px]">delete_sweep</span>
-                  移到回收站
+                  {t.duplicates.moveToTrash}
                 </button>
               </div>
             </>
@@ -375,17 +377,17 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan, o
           onClose={() => setCtx(null)}
           items={[
             {
-              label: "复制文件名",
+              label: t.duplicates.copyName,
               icon: "file_copy",
-              onClick: () => { navigator.clipboard.writeText(ctx.file.name); showToast("已复制文件名"); },
+              onClick: () => { navigator.clipboard.writeText(ctx.file.name); showToast(t.duplicates.copiedName); },
             },
             {
-              label: "复制完整路径",
+              label: t.duplicates.copyPath,
               icon: "content_copy",
-              onClick: () => { navigator.clipboard.writeText(ctx.file.path); showToast("已复制完整路径"); },
+              onClick: () => { navigator.clipboard.writeText(ctx.file.path); showToast(t.duplicates.copiedPath); },
             },
             {
-              label: "在文件管理器中打开",
+              label: t.duplicates.revealInExplorer,
               icon: "folder_open",
               onClick: () => revealItemInDir(ctx.file.path).catch(() => {}),
             },
