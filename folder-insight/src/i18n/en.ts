@@ -236,6 +236,9 @@ export const en: Translations = {
     langLabel: "Language",
     langZh: "中文",
     langEn: "English",
+    themeLabel: "Appearance",
+    themeLight: "Light",
+    themeDark: "Dark",
   },
 
   common: {

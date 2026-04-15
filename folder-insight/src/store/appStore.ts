@@ -3,6 +3,11 @@ import type { ScanSession, ScanStatus, ScanProgress, ScanResult, ExcludeRule, Du
 import type { Locale } from "../i18n";
 
 type DupStatus = "idle" | "scanning" | "cancelling" | "done";
+export type Theme = "light" | "dark";
+
+function applyTheme(theme: Theme) {
+  document.documentElement.classList.toggle("dark", theme === "dark");
+}
 
 interface AppState {
   session: ScanSession;
@@ -10,6 +15,7 @@ interface AppState {
   duplicatesResult: DuplicateCluster[] | null;
   duplicatesStatus: DupStatus;
   locale: Locale;
+  theme: Theme;
 
   // Actions
   setScanRoots: (roots: string[]) => void;
@@ -23,6 +29,7 @@ interface AppState {
   setDuplicatesResult: (clusters: DuplicateCluster[]) => void;
   setDuplicatesStatus: (status: DupStatus) => void;
   setLocale: (locale: Locale) => void;
+  setTheme: (theme: Theme) => void;
 }
 
 const defaultSession: ScanSession = {
@@ -45,12 +52,17 @@ const builtinRules: ExcludeRule[] = [
   { id: "b-sysvolinfo", pattern: "System Volume Information", type: "path", enabled: true, builtin: true, label: "系统卷信息" },
 ];
 
-export const useAppStore = create<AppState>((set) => ({
+export const useAppStore = create<AppState>((set) => {
+  const savedTheme = (localStorage.getItem("theme") as Theme | null) ?? "light";
+  applyTheme(savedTheme);
+
+  return {
   session: defaultSession,
   excludeRules: builtinRules,
   duplicatesResult: null,
   duplicatesStatus: "idle",
   locale: (localStorage.getItem("locale") as Locale | null) ?? "zh",
+  theme: savedTheme,
 
   setScanRoots: (roots) =>
     set((s) => ({ session: { ...s.session, roots } })),
@@ -96,4 +108,11 @@ export const useAppStore = create<AppState>((set) => ({
     localStorage.setItem("locale", locale);
     set({ locale });
   },
-}));
+
+  setTheme: (theme) => {
+    localStorage.setItem("theme", theme);
+    applyTheme(theme);
+    set({ theme });
+  },
+  };
+});

@@ -4,7 +4,7 @@ import { useT } from "../../hooks/useT";
 
 export default function Sidebar() {
   const location = useLocation();
-  const { session, resetSession, setScanStatus } = useAppStore();
+  const { session, resetSession, setScanStatus, theme, setTheme } = useAppStore();
   const t = useT();
 
   const navItems = [
@@ -19,7 +19,7 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className="h-screen w-60 fixed left-0 top-0 bg-slate-100 flex flex-col py-6 px-4 z-50 select-none">
+    <aside className="h-screen w-60 fixed left-0 top-0 bg-surface-container-low flex flex-col py-6 px-4 z-50 select-none border-r border-outline-variant/20">
       {/* Logo */}
       <div className="mb-8 px-2 flex items-center gap-3">
         <div className="w-8 h-8 rounded-md bg-primary flex items-center justify-center shrink-0">
@@ -42,8 +42,8 @@ export default function Sidebar() {
               className={[
                 "flex items-center gap-3 px-3 py-2.5 rounded-lg font-headline text-sm tracking-tight transition-colors duration-150",
                 active
-                  ? "text-teal-700 font-semibold border-r-2 border-teal-700 bg-slate-200/60"
-                  : "text-slate-500 hover:text-teal-600 hover:bg-slate-200/50",
+                  ? "text-primary font-semibold border-r-2 border-primary bg-surface-container-high"
+                  : "text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high",
               ].join(" ")}
             >
               <span
@@ -68,21 +68,28 @@ export default function Sidebar() {
       </button>
 
       {/* Bottom links */}
-      <div className="pt-4 border-t border-slate-200 space-y-0.5">
+      <div className="pt-4 border-t border-outline-variant/20 space-y-0.5">
         <NavLink
           to="/settings"
           className={({ isActive }) =>
             [
               "flex items-center gap-3 px-3 py-2 rounded-lg font-headline text-sm tracking-tight transition-colors",
               isActive
-                ? "text-teal-700 font-semibold bg-slate-200/60"
-                : "text-slate-500 hover:text-teal-600 hover:bg-slate-200/50",
+                ? "text-primary font-semibold bg-surface-container-high"
+                : "text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high",
             ].join(" ")
           }
         >
           <span className="material-symbols-outlined text-[20px]">settings</span>
           <span>{t.sidebar.settings}</span>
         </NavLink>
+        <button
+          onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg font-headline text-sm tracking-tight text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors"
+        >
+          <span className="material-symbols-outlined text-[20px]">{theme === "light" ? "dark_mode" : "light_mode"}</span>
+          <span>{theme === "light" ? t.settings.themeDark : t.settings.themeLight}</span>
+        </button>
       </div>
 
       {/* Scan status indicator */}

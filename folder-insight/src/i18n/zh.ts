@@ -243,6 +243,9 @@ export const zh = {  // Sidebar
     langLabel: "语言",
     langZh: "中文",
     langEn: "English",
+    themeLabel: "外观",
+    themeLight: "浅色",
+    themeDark: "深色",
   },
 
   // Common

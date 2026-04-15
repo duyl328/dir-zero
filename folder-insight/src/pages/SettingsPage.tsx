@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useAppStore } from "../store/appStore";
 import { useT } from "../hooks/useT";
 import type { Locale } from "../i18n";
+import type { Theme } from "../store/appStore";
 
 const RESIDUE_BUILTIN = [
   { id: "r-ds_store", pattern: ".DS_Store", type: "glob" as const, enabled: true, builtin: true, label: "macOS .DS_Store" },
@@ -13,7 +14,7 @@ const RESIDUE_BUILTIN = [
 ];
 
 export default function SettingsPage() {
-  const { excludeRules, toggleExcludeRule, addExcludeRule, removeExcludeRule, locale, setLocale } = useAppStore();
+  const { excludeRules, toggleExcludeRule, addExcludeRule, removeExcludeRule, locale, setLocale, theme, setTheme } = useAppStore();
   const t = useT();
   const [residueRules, setResidueRules] = useState(RESIDUE_BUILTIN);
   const [newPattern, setNewPattern] = useState("");
@@ -53,6 +54,20 @@ export default function SettingsPage() {
             <button key={l} onClick={() => setLocale(l)}
               className={["px-4 py-2 rounded-lg text-sm font-semibold transition-colors", locale === l ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest"].join(" ")}>
               {l === "zh" ? t.settings.langZh : t.settings.langEn}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* Appearance */}
+      <section>
+        <h3 className="font-headline font-bold text-base text-on-surface mb-3">{t.settings.themeLabel}</h3>
+        <div className="flex items-center gap-2">
+          {(["light", "dark"] as Theme[]).map((th) => (
+            <button key={th} onClick={() => setTheme(th)}
+              className={["flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors", theme === th ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest"].join(" ")}>
+              <span className="material-symbols-outlined text-[16px]">{th === "light" ? "light_mode" : "dark_mode"}</span>
+              {th === "light" ? t.settings.themeLight : t.settings.themeDark}
             </button>
           ))}
         </div>
