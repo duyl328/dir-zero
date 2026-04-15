@@ -54,11 +54,11 @@ export default function SettingsPage() {
               <button
                 onClick={() => toggleExcludeRule(rule.id)}
                 className={[
-                  "relative w-9 h-5 rounded-full transition-colors shrink-0",
+                  "relative w-9 h-5 rounded-full transition-colors shrink-0 overflow-hidden",
                   rule.enabled ? "bg-primary" : "bg-surface-container-highest",
                 ].join(" ")}
               >
-                <span className={["absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform", rule.enabled ? "translate-x-4" : "translate-x-0.5"].join(" ")} />
+                <span className={["absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform", rule.enabled ? "translate-x-4" : "translate-x-0"].join(" ")} />
               </button>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-on-surface">{rule.label}</p>
@@ -123,9 +123,9 @@ export default function SettingsPage() {
             <div key={rule.id} className="flex items-center gap-3 px-4 py-3 bg-surface-container-lowest rounded-xl border border-outline-variant/10">
               <button
                 onClick={() => toggleResidue(rule.id)}
-                className={["relative w-9 h-5 rounded-full transition-colors shrink-0", rule.enabled ? "bg-primary" : "bg-surface-container-highest"].join(" ")}
+                className={["relative w-9 h-5 rounded-full transition-colors shrink-0 overflow-hidden", rule.enabled ? "bg-primary" : "bg-surface-container-highest"].join(" ")}
               >
-                <span className={["absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform", rule.enabled ? "translate-x-4" : "translate-x-0.5"].join(" ")} />
+                <span className={["absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform", rule.enabled ? "translate-x-4" : "translate-x-0"].join(" ")} />
               </button>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-on-surface">{rule.label}</p>
