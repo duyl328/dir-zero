@@ -189,6 +189,20 @@ export default function FindProblemsPage() {
             status={duplicatesStatus}
             dupProgress={dupProgress}
             onScan={startDuplicateScan}
+            onDeleted={(deletedPaths) => {
+              if (!duplicatesResult) return;
+              const updated = duplicatesResult
+                .map((c) => ({
+                  ...c,
+                  files: c.files.filter((f) => !deletedPaths.has(f.path)),
+                }))
+                .map((c) => ({
+                  ...c,
+                  reclaimable: c.fileSize * Math.max(0, c.files.length - 1),
+                }))
+                .filter((c) => c.files.length >= 2);
+              setDuplicatesResult(updated);
+            }}
           />
         )}
         {tab === "structure" && structureData && (

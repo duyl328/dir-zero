@@ -12,6 +12,7 @@ interface Props {
   status: "idle" | "scanning" | "done";
   dupProgress: { processed: number; total: number } | null;
   onScan: () => void;
+  onDeleted: (deletedPaths: Set<string>) => void;
 }
 
 function formatBytes(b: number) {
@@ -22,7 +23,7 @@ function formatBytes(b: number) {
 
 interface CtxState { x: number; y: number; file: FileEntry }
 
-export default function DuplicatesTab({ clusters, status, dupProgress, onScan }: Props) {
+export default function DuplicatesTab({ clusters, status, dupProgress, onScan, onDeleted }: Props) {
   const { show: showToast, ToastContainer } = useToast();
   const [strategy, setStrategy] = useState<KeepStrategy>("newest");
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -30,6 +31,7 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan }:
   // manual keep overrides: clusterId → path to keep
   const [manualKeep, setManualKeep] = useState<Record<string, string>>({});
   const [deleting, setDeleting] = useState(false);
+  const [deleteProgress, setDeleteProgress] = useState<{ done: number; total: number } | null>(null);
   const [ctx, setCtx] = useState<CtxState | null>(null);
 
   if (status === "idle") {
@@ -108,19 +110,42 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan }:
   const totalSelected = clusters.filter((c) => selected.has(c.id)).reduce((s, c) => s + c.reclaimable, 0);
 
   async function handleClean() {
-    const paths = clusters!
+    const toDelete = clusters!
       .filter((c) => selected.has(c.id))
       .flatMap((c) => {
         const keep = getKeepPath(c);
         return c.files.filter((f) => f.path !== keep).map((f) => f.path);
       });
-    if (paths.length === 0) return;
+    if (toDelete.length === 0) return;
+
     setDeleting(true);
+    setDeleteProgress({ done: 0, total: toDelete.length });
+
+    const BATCH = 20;
+    const failed: string[] = [];
+    let done = 0;
+
     try {
-      await invoke("move_to_trash", { paths });
+      for (let i = 0; i < toDelete.length; i += BATCH) {
+        const batch = toDelete.slice(i, i + BATCH);
+        const batchFailed = await invoke<string[]>("move_to_trash", { paths: batch });
+        failed.push(...batchFailed);
+        done += batch.length;
+        setDeleteProgress({ done, total: toDelete.length });
+      }
+
+      const deletedSet = new Set(toDelete.filter((p) => !failed.includes(p)));
+      onDeleted(deletedSet);
       setSelected(new Set());
+
+      if (failed.length === 0) {
+        showToast(`已移到回收站 ${deletedSet.size} 个文件`, "check_circle");
+      } else {
+        showToast(`完成，${failed.length} 个文件失败`, "warning");
+      }
     } finally {
       setDeleting(false);
+      setDeleteProgress(null);
     }
   }
 
@@ -282,27 +307,53 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan }:
       {/* Floating action bar */}
       {selected.size > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 glass-panel px-8 py-4 rounded-2xl shadow-2xl border border-white/30 flex items-center gap-8 z-50">
-          <div>
-            <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">已选中</p>
-            <p className="font-headline text-lg font-extrabold text-on-surface">
-              {formatBytes(totalSelected)} · {selected.size} 组
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setSelected(new Set())}
-              className="px-5 py-2.5 rounded-lg text-sm font-semibold text-on-surface-variant hover:bg-surface-container-high transition-colors"
-            >
-              取消
-            </button>
-            <button
-              onClick={handleClean} disabled={deleting}
-              className="cta-gradient px-7 py-2.5 rounded-lg text-sm font-bold text-on-primary shadow-lg shadow-primary/20 flex items-center gap-2 active:scale-95 duration-150 disabled:opacity-60"
-            >
-              <span className="material-symbols-outlined text-[18px]">delete_sweep</span>
-              {deleting ? "处理中…" : "移到回收站"}
-            </button>
-          </div>
+          {deleting && deleteProgress ? (
+            /* Progress state */
+            <div className="flex items-center gap-5">
+              <div>
+                <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">正在移到回收站</p>
+                <p className="font-headline text-lg font-extrabold text-on-surface">
+                  {deleteProgress.done} / {deleteProgress.total} 个文件
+                </p>
+              </div>
+              <div className="w-40">
+                <div className="h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary rounded-full transition-all duration-200"
+                    style={{ width: `${Math.round((deleteProgress.done / deleteProgress.total) * 100)}%` }}
+                  />
+                </div>
+                <p className="text-[10px] text-on-surface-variant/50 mt-1 text-right">
+                  {Math.round((deleteProgress.done / deleteProgress.total) * 100)}%
+                </p>
+              </div>
+            </div>
+          ) : (
+            /* Normal state */
+            <>
+              <div>
+                <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">已选中</p>
+                <p className="font-headline text-lg font-extrabold text-on-surface">
+                  {formatBytes(totalSelected)} · {selected.size} 组
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setSelected(new Set())}
+                  className="px-5 py-2.5 rounded-lg text-sm font-semibold text-on-surface-variant hover:bg-surface-container-high transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleClean}
+                  className="cta-gradient px-7 py-2.5 rounded-lg text-sm font-bold text-on-primary shadow-lg shadow-primary/20 flex items-center gap-2 active:scale-95 duration-150"
+                >
+                  <span className="material-symbols-outlined text-[18px]">delete_sweep</span>
+                  移到回收站
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
 
