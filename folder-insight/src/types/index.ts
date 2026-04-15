@@ -81,10 +81,29 @@ export interface DuplicateCluster {
 }
 
 export interface StructureIssue {
-  type: "empty_folder" | "deep_nest" | "long_path" | "single_child_chain" | "dense_small" | "odd_name";
+  type: "empty_folder" | "zero_byte" | "deep_nest" | "long_path" | "single_child_chain" | "dense_small" | "odd_name";
   path: string;
   severity: "safe" | "caution";
   detail: string;
+}
+
+// Raw shape returned by Rust find_duplicates command
+export interface RawDuplicateCluster {
+  id: string;
+  hash: string;
+  fileSize: number;
+  filePaths: string[];
+  reclaimable: number;
+  suggestedKeep: string;
+}
+
+export interface DuplicateCluster {
+  id: string;
+  hash: string;
+  fileSize: number;
+  files: FileEntry[];
+  reclaimable: number;
+  suggestedKeep: string;
 }
 
 export interface ResidueFile {

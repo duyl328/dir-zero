@@ -1,9 +1,13 @@
 import { create } from "zustand";
-import type { ScanSession, ScanStatus, ScanProgress, ScanResult, ExcludeRule } from "../types";
+import type { ScanSession, ScanStatus, ScanProgress, ScanResult, ExcludeRule, DuplicateCluster } from "../types";
+
+type DupStatus = "idle" | "scanning" | "done";
 
 interface AppState {
   session: ScanSession;
   excludeRules: ExcludeRule[];
+  duplicatesResult: DuplicateCluster[] | null;
+  duplicatesStatus: DupStatus;
 
   // Actions
   setScanRoots: (roots: string[]) => void;
@@ -14,6 +18,8 @@ interface AppState {
   toggleExcludeRule: (id: string) => void;
   addExcludeRule: (rule: ExcludeRule) => void;
   removeExcludeRule: (id: string) => void;
+  setDuplicatesResult: (clusters: DuplicateCluster[]) => void;
+  setDuplicatesStatus: (status: DupStatus) => void;
 }
 
 const defaultSession: ScanSession = {
@@ -39,6 +45,8 @@ const builtinRules: ExcludeRule[] = [
 export const useAppStore = create<AppState>((set) => ({
   session: defaultSession,
   excludeRules: builtinRules,
+  duplicatesResult: null,
+  duplicatesStatus: "idle",
 
   setScanRoots: (roots) =>
     set((s) => ({ session: { ...s.session, roots } })),
@@ -73,4 +81,10 @@ export const useAppStore = create<AppState>((set) => ({
 
   removeExcludeRule: (id) =>
     set((s) => ({ excludeRules: s.excludeRules.filter((r) => r.id !== id) })),
+
+  setDuplicatesResult: (clusters) =>
+    set({ duplicatesResult: clusters, duplicatesStatus: "done" }),
+
+  setDuplicatesStatus: (status) =>
+    set({ duplicatesStatus: status }),
 }));

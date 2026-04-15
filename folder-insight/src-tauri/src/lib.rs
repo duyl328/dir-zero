@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::io::Read;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
@@ -327,6 +329,37 @@ fn scan_dir_recursive(
 
 // ── Tauri commands ───────────────────────────────────────────────────────────
 
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct DuplicateCluster {
+    pub id: String,
+    pub hash: String,
+    pub file_size: u64,
+    pub file_paths: Vec<String>,
+    pub reclaimable: u64,
+    pub suggested_keep: String,
+}
+
+fn quick_hash(path: &str, size: u64) -> Option<Vec<u8>> {
+    let mut f = std::fs::File::open(path).ok()?;
+    let cap = (65536_u64).min(size) as usize;
+    let mut buf = vec![0u8; cap];
+    f.read_exact(&mut buf).ok()?;
+    Some(blake3::hash(&buf).as_bytes().to_vec())
+}
+
+fn full_hash(path: &str) -> Option<String> {
+    let mut hasher = blake3::Hasher::new();
+    let mut f = std::fs::File::open(path).ok()?;
+    let mut buf = vec![0u8; 1024 * 1024];
+    loop {
+        let n = f.read(&mut buf).ok()?;
+        if n == 0 { break; }
+        hasher.update(&buf[..n]);
+    }
+    Some(hasher.finalize().to_hex().to_string())
+}
+
 #[tauri::command]
 async fn scan_folder(
     app: AppHandle,
@@ -392,12 +425,101 @@ async fn scan_folder(
     })
 }
 
+#[tauri::command]
+async fn find_duplicates(
+    app: AppHandle,
+    paths: Vec<String>,
+) -> Result<Vec<DuplicateCluster>, String> {
+    // Group by size, skip zero-byte files
+    let mut size_groups: HashMap<u64, Vec<String>> = HashMap::new();
+    for path in &paths {
+        if let Ok(meta) = std::fs::metadata(path) {
+            let size = meta.len();
+            if size > 0 {
+                size_groups.entry(size).or_default().push(path.clone());
+            }
+        }
+    }
+
+    let candidates: Vec<(u64, Vec<String>)> = size_groups
+        .into_iter()
+        .filter(|(_, p)| p.len() >= 2)
+        .collect();
+
+    if candidates.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let total: usize = candidates.iter().map(|(_, p)| p.len()).sum();
+    let mut processed = 0usize;
+    let mut hash_groups: HashMap<String, Vec<String>> = HashMap::new();
+
+    for (size, paths) in &candidates {
+        // Quick hash pass
+        let mut quick: HashMap<Vec<u8>, Vec<String>> = HashMap::new();
+        for path in paths {
+            if let Some(h) = quick_hash(path, *size) {
+                quick.entry(h).or_default().push(path.clone());
+            }
+            processed += 1;
+            if processed % 100 == 0 {
+                let _ = app.emit("dup-progress", serde_json::json!({
+                    "processed": processed, "total": total
+                }));
+            }
+        }
+
+        // Full hash only for quick-hash collisions
+        for (_, qpaths) in quick.into_iter().filter(|(_, p)| p.len() >= 2) {
+            for path in &qpaths {
+                if let Some(h) = full_hash(path) {
+                    let key = format!("{}-{}", size, h);
+                    hash_groups.entry(key).or_default().push(path.clone());
+                }
+            }
+        }
+    }
+
+    let mut clusters: Vec<DuplicateCluster> = hash_groups
+        .into_iter()
+        .filter(|(_, p)| p.len() >= 2)
+        .enumerate()
+        .map(|(i, (hash, mut file_paths))| {
+            // Sort newest-first for suggested keep
+            file_paths.sort_by(|a, b| {
+                let ta = std::fs::metadata(a).and_then(|m| m.modified()).ok();
+                let tb = std::fs::metadata(b).and_then(|m| m.modified()).ok();
+                tb.cmp(&ta)
+            });
+            let file_size = std::fs::metadata(&file_paths[0]).map(|m| m.len()).unwrap_or(0);
+            let reclaimable = file_size * (file_paths.len() as u64 - 1);
+            let suggested_keep = file_paths[0].clone();
+            DuplicateCluster { id: format!("dup-{}", i), hash, file_size, reclaimable, suggested_keep, file_paths }
+        })
+        .collect();
+
+    clusters.sort_by(|a, b| b.reclaimable.cmp(&a.reclaimable));
+    let _ = app.emit("dup-progress", serde_json::json!({ "processed": total, "total": total }));
+    Ok(clusters)
+}
+
+#[tauri::command]
+async fn move_to_trash(paths: Vec<String>) -> Result<Vec<String>, String> {
+    let mut failed: Vec<String> = vec![];
+    for path in &paths {
+        if let Err(e) = trash::delete(path) {
+            failed.push(format!("{}: {}", path, e));
+        }
+    }
+    Ok(failed)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![scan_folder])
+        .invoke_handler(tauri::generate_handler![scan_folder, find_duplicates, move_to_trash])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
