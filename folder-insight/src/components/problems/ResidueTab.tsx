@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import ContextMenu from "../ui/ContextMenu";
+import { useToast } from "../../hooks/useToast";
 import type { ResidueGroup, ResidueRuleDef } from "../../analysis/residueAnalysis";
 import type { FileEntry } from "../../types";
 
@@ -86,6 +87,7 @@ interface CtxState { x: number; y: number; file: FileEntry }
 
 export default function ResidueTab({ groups: initialGroups, onRefresh, onAddRule }: Props) {
   const groups = initialGroups;
+  const { show: showToast, ToastContainer } = useToast();
   const [selected, setSelected] = useState<Set<string>>(
     new Set(initialGroups.filter((g) => g.enabled).map((g) => g.ruleId))
   );
@@ -93,6 +95,7 @@ export default function ResidueTab({ groups: initialGroups, onRefresh, onAddRule
   const [deleting, setDeleting] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
+  const [showExcluded, setShowExcluded] = useState(false);
   const [ctx, setCtx] = useState<CtxState | null>(null);
 
   useEffect(() => {
@@ -157,7 +160,7 @@ export default function ResidueTab({ groups: initialGroups, onRefresh, onAddRule
   }
 
   return (
-    <div className="px-8 py-6">
+    <div className="px-8 py-6 pb-28">{/* pb-28 reserves space for the floating action bar */}
       {visibleGroups.length > 1 && (
         <div className="flex items-center gap-3 mb-3">
           <button
@@ -253,6 +256,50 @@ export default function ResidueTab({ groups: initialGroups, onRefresh, onAddRule
         })}
       </div>
 
+      {/* Excluded files section */}
+      {excluded.size > 0 && (
+        <div className="mb-5">
+          <button
+            onClick={() => setShowExcluded((v) => !v)}
+            className="flex items-center gap-2 text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-widest hover:text-on-surface-variant transition-colors mb-2"
+          >
+            <span className="material-symbols-outlined text-[14px]">{showExcluded ? "expand_less" : "expand_more"}</span>
+            已排除 {excluded.size} 个文件
+          </button>
+          {showExcluded && (
+            <div className="rounded-xl border border-outline-variant/10 bg-surface-container-lowest overflow-hidden">
+              {[...excluded].map((path) => {
+                const name = path.split(/[\\/]/).pop() ?? path;
+                return (
+                  <div key={path} className="flex items-center gap-3 px-4 py-2.5 border-b border-outline-variant/5 last:border-0 hover:bg-surface-container-high transition-colors group">
+                    <span className="material-symbols-outlined text-[15px] text-on-surface-variant/30 shrink-0">block</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-on-surface-variant truncate">{name}</p>
+                      <p className="text-[10px] font-mono text-on-surface-variant/40 truncate">{path}</p>
+                    </div>
+                    <button
+                      onClick={() => setExcluded((prev) => { const next = new Set(prev); next.delete(path); return next; })}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-primary hover:bg-primary/10"
+                    >
+                      <span className="material-symbols-outlined text-[13px]">undo</span>
+                      恢复
+                    </button>
+                  </div>
+                );
+              })}
+              <div className="px-4 py-2 border-t border-outline-variant/10 flex justify-end">
+                <button
+                  onClick={() => setExcluded(new Set())}
+                  className="text-[10px] font-bold text-on-surface-variant/50 hover:text-error transition-colors"
+                >
+                  清空白名单
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {showAddForm ? (
         <AddRuleForm
           onCancel={() => setShowAddForm(false)}
@@ -295,17 +342,17 @@ export default function ResidueTab({ groups: initialGroups, onRefresh, onAddRule
             {
               label: "复制文件名",
               icon: "file_copy",
-              onClick: () => navigator.clipboard.writeText(ctx.file.name),
+              onClick: () => { navigator.clipboard.writeText(ctx.file.name); showToast("已复制文件名"); },
             },
             {
               label: "复制完整路径",
               icon: "content_copy",
-              onClick: () => navigator.clipboard.writeText(ctx.file.path),
+              onClick: () => { navigator.clipboard.writeText(ctx.file.path); showToast("已复制完整路径"); },
             },
             {
               label: "复制路径和文件名",
               icon: "copy_all",
-              onClick: () => navigator.clipboard.writeText(ctx.file.path),
+              onClick: () => { navigator.clipboard.writeText(ctx.file.path); showToast("已复制路径和文件名"); },
             },
             {
               label: "在文件管理器中打开",
@@ -315,12 +362,13 @@ export default function ResidueTab({ groups: initialGroups, onRefresh, onAddRule
             {
               label: "排除此文件（不再提示）",
               icon: "block",
-              onClick: () => setExcluded((prev) => new Set([...prev, ctx.file.path])),
+              onClick: () => { setExcluded((prev) => new Set([...prev, ctx.file.path])); showToast("已加入白名单", "block"); },
               danger: true,
             },
           ]}
         />
       )}
+      {ToastContainer}
     </div>
   );
 }
