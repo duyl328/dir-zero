@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useAppStore } from "../store/appStore";
@@ -8,6 +8,7 @@ import ResidueTab from "../components/problems/ResidueTab";
 import { analyzeStructure } from "../analysis/structureAnalysis";
 import { analyzeResidue, BUILTIN_RESIDUE_RULES, storedRuleToRuleDef } from "../analysis/residueAnalysis";
 import { useCustomResidueRules } from "../hooks/useCustomResidueRules";
+import { useToast } from "../hooks/useToast";
 import type { FileEntry, RawDuplicateCluster, DuplicateCluster } from "../types";
 
 type Tab = "duplicates" | "structure" | "residue";
@@ -35,6 +36,21 @@ export default function FindProblemsPage() {
   const [deletedPaths, setDeletedPaths] = useState<Set<string>>(new Set());
   const { rules: customRules, addRule, removeRule, toggleEnabled } = useCustomResidueRules();
   const cancelledRef = useRef(false);
+  const { show: showToast, ToastContainer } = useToast();
+  // Track in-progress deletions per tab for the tab-button indicator
+  const [activeDeletes, setActiveDeletes] = useState<Set<Tab>>(new Set());
+
+  const markDeleteStart = useCallback((tabId: Tab) =>
+    setActiveDeletes((prev) => new Set([...prev, tabId])), []);
+
+  const markDeleteComplete = useCallback((tabId: Tab, label: string, succeeded: number, failed: number) => {
+    setActiveDeletes((prev) => { const next = new Set(prev); next.delete(tabId); return next; });
+    if (failed === 0) {
+      showToast(`${label}：已移到回收站 ${succeeded} 个`, "check_circle");
+    } else {
+      showToast(`${label}：完成，${failed} 个失败`, "warning");
+    }
+  }, [showToast]);
 
   // Reset per-session state when a new scan starts
   const prevSessionId = useRef(session.id);
@@ -185,29 +201,34 @@ export default function FindProblemsPage() {
 
         {/* Tabs */}
         <div className="flex items-center gap-1 border-b border-outline-variant/20">
-          {TABS.map(({ id, icon, label, count }) => (
-            <button
-              key={id}
-              onClick={() => setTab(id)}
-              className={[
-                "flex items-center gap-2 px-5 py-2.5 text-sm font-semibold font-headline transition-all border-b-2 -mb-px",
-                tab === id
-                  ? "border-primary text-primary"
-                  : "border-transparent text-on-surface-variant hover:text-on-surface",
-              ].join(" ")}
-            >
-              <span className="material-symbols-outlined text-[18px]">{icon}</span>
-              {label}
-              {count > 0 && (
-                <span className={[
-                  "text-[10px] font-bold px-1.5 py-0.5 rounded-full",
-                  tab === id ? "bg-primary/15 text-primary" : "bg-surface-container-high text-on-surface-variant",
-                ].join(" ")}>
-                  {count.toLocaleString()}
-                </span>
-              )}
-            </button>
-          ))}
+          {TABS.map(({ id, icon, label, count }) => {
+            const isDeleting = activeDeletes.has(id);
+            return (
+              <button
+                key={id}
+                onClick={() => setTab(id)}
+                className={[
+                  "flex items-center gap-2 px-5 py-2.5 text-sm font-semibold font-headline transition-all border-b-2 -mb-px",
+                  tab === id
+                    ? "border-primary text-primary"
+                    : "border-transparent text-on-surface-variant hover:text-on-surface",
+                ].join(" ")}
+              >
+                <span className="material-symbols-outlined text-[18px]">{icon}</span>
+                {label}
+                {isDeleting ? (
+                  <span className="w-2 h-2 rounded-full bg-primary animate-pulse shrink-0" title="正在删除…" />
+                ) : count > 0 ? (
+                  <span className={[
+                    "text-[10px] font-bold px-1.5 py-0.5 rounded-full",
+                    tab === id ? "bg-primary/15 text-primary" : "bg-surface-container-high text-on-surface-variant",
+                  ].join(" ")}>
+                    {count.toLocaleString()}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -237,6 +258,8 @@ export default function FindProblemsPage() {
               data={structureData}
               onRefresh={() => setRefreshKey((k) => k + 1)}
               onDeleted={(paths) => setDeletedPaths((prev) => new Set([...prev, ...paths]))}
+              onDeleteStart={() => markDeleteStart("structure")}
+              onDeleteComplete={(s, f) => markDeleteComplete("structure", "结构", s, f)}
             />
           </div>
         )}
@@ -249,9 +272,12 @@ export default function FindProblemsPage() {
             onToggleRule={toggleEnabled}
             onRemoveRule={removeRule}
             onDeleted={(paths) => setDeletedPaths((prev) => new Set([...prev, ...paths]))}
+            onDeleteStart={() => markDeleteStart("residue")}
+            onDeleteComplete={(s, f) => markDeleteComplete("residue", "残留", s, f)}
           />
         </div>
       </div>
+      {ToastContainer}
     </div>
   );
 }

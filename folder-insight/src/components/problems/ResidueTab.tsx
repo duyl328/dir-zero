@@ -14,6 +14,8 @@ interface Props {
   onToggleRule: (id: string) => void;
   onRemoveRule: (id: string) => void;
   onDeleted: (paths: Set<string>) => void;
+  onDeleteStart: (total: number) => void;
+  onDeleteComplete: (succeeded: number, failed: number) => void;
 }
 
 function formatBytes(b: number) {
@@ -84,7 +86,7 @@ function AddRuleForm({ onAdd, onCancel }: {
 
 interface CtxState { x: number; y: number; file: FileEntry }
 
-export default function ResidueTab({ groups: initialGroups, customRules, onRefresh, onAddRule, onToggleRule, onRemoveRule, onDeleted }: Props) {
+export default function ResidueTab({ groups: initialGroups, customRules, onRefresh, onAddRule, onToggleRule, onRemoveRule, onDeleted, onDeleteStart, onDeleteComplete }: Props) {
   const groups = initialGroups;
   const { show: showToast, ToastContainer } = useToast();
   const [selected, setSelected] = useState<Set<string>>(
@@ -133,6 +135,7 @@ export default function ResidueTab({ groups: initialGroups, customRules, onRefre
 
     setDeleting(true);
     setDeleteProgress({ done: 0, total: paths.length });
+    onDeleteStart(paths.length);
 
     const BATCH = 20;
     const failed: string[] = [];
@@ -149,11 +152,7 @@ export default function ResidueTab({ groups: initialGroups, customRules, onRefre
 
       const succeeded = new Set(paths.filter((p) => !failed.includes(p)));
       onDeleted(succeeded);
-      if (failed.length === 0) {
-        showToast(`已移到回收站 ${paths.length} 个文件`, "check_circle");
-      } else {
-        showToast(`完成，${failed.length} 个文件失败`, "warning");
-      }
+      onDeleteComplete(succeeded.size, failed.length);
       onRefresh();
     } finally {
       setDeleting(false);

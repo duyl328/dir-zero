@@ -9,6 +9,8 @@ interface Props {
   data: StructureAnalysisResult;
   onRefresh: () => void;
   onDeleted: (paths: Set<string>) => void;
+  onDeleteStart: (total: number) => void;
+  onDeleteComplete: (succeeded: number, failed: number) => void;
 }
 
 interface IssueCardProps {
@@ -162,7 +164,7 @@ function IssueCard({ icon, label, detail, severity, items, canDelete, selected, 
   );
 }
 
-export default function StructureTab({ data, onRefresh, onDeleted }: Props) {
+export default function StructureTab({ data, onRefresh, onDeleted, onDeleteStart, onDeleteComplete }: Props) {
   const { show: showToast, ToastContainer } = useToast();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
@@ -206,6 +208,7 @@ export default function StructureTab({ data, onRefresh, onDeleted }: Props) {
 
     setDeleting(true);
     setDeleteProgress({ done: 0, total: toDelete.length });
+    onDeleteStart(toDelete.length);
 
     const BATCH = 20;
     const failed: string[] = [];
@@ -228,12 +231,7 @@ export default function StructureTab({ data, onRefresh, onDeleted }: Props) {
         return next;
       });
       onDeleted(succeeded);
-
-      if (failed.length === 0) {
-        showToast(`已移到回收站 ${succeeded.size} 个项目`, "check_circle");
-      } else {
-        showToast(`完成，${failed.length} 个项目失败`, "warning");
-      }
+      onDeleteComplete(succeeded.size, failed.length);
       onRefresh();
     } finally {
       setDeleting(false);
