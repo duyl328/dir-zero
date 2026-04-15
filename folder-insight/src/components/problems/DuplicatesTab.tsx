@@ -9,9 +9,10 @@ type KeepStrategy = "newest" | "oldest" | "manual";
 
 interface Props {
   clusters: DuplicateCluster[] | null;
-  status: "idle" | "scanning" | "done";
+  status: "idle" | "scanning" | "cancelling" | "done";
   dupProgress: { processed: number; total: number } | null;
   onScan: () => void;
+  onCancel: () => void;
   onDeleted: (deletedPaths: Set<string>) => void;
 }
 
@@ -23,7 +24,7 @@ function formatBytes(b: number) {
 
 interface CtxState { x: number; y: number; file: FileEntry }
 
-export default function DuplicatesTab({ clusters, status, dupProgress, onScan, onDeleted }: Props) {
+export default function DuplicatesTab({ clusters, status, dupProgress, onScan, onCancel, onDeleted }: Props) {
   const { show: showToast, ToastContainer } = useToast();
   const [strategy, setStrategy] = useState<KeepStrategy>("newest");
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -57,7 +58,7 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan, o
     );
   }
 
-  if (status === "scanning") {
+  if (status === "scanning" || status === "cancelling") {
     const pct = dupProgress && dupProgress.total > 0
       ? Math.round((dupProgress.processed / dupProgress.total) * 100)
       : 0;
@@ -69,8 +70,10 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan, o
           </span>
         </div>
         <div>
-          <p className="text-sm font-bold text-on-surface mb-1">正在计算哈希值…</p>
-          {dupProgress && (
+          <p className="text-sm font-bold text-on-surface mb-1">
+            {status === "cancelling" ? "正在取消…" : "正在计算哈希值…"}
+          </p>
+          {dupProgress && status === "scanning" && (
             <p className="text-xs text-on-surface-variant">
               {dupProgress.processed.toLocaleString()} / {dupProgress.total.toLocaleString()} 个文件
             </p>
@@ -79,6 +82,14 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan, o
         <div className="w-64 h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
           <div className="h-full bg-primary rounded-full transition-all duration-300" style={{ width: `${pct}%` }} />
         </div>
+        {status === "scanning" && (
+          <button
+            onClick={onCancel}
+            className="mt-2 px-5 py-2 rounded-lg text-xs font-semibold text-on-surface-variant hover:bg-surface-container-high transition-colors"
+          >
+            取消
+          </button>
+        )}
       </div>
     );
   }

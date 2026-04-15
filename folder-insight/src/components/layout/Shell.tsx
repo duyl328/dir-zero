@@ -1,19 +1,36 @@
-import { Outlet } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import ScanConfigModal from "../scan/ScanConfigModal";
 import ScanProgressOverlay from "../scan/ScanProgressOverlay";
 import { useAppStore } from "../../store/appStore";
+import OverviewPage from "../../pages/OverviewPage";
+import FindProblemsPage from "../../pages/FindProblemsPage";
+import FileTypesPage from "../../pages/FileTypesPage";
+import SettingsPage from "../../pages/SettingsPage";
 
 export default function Shell() {
   const status = useAppStore((s) => s.session.status);
+  const { pathname } = useLocation();
 
   return (
     <div className="flex h-screen overflow-hidden bg-surface">
       <Sidebar />
 
       <div className="flex-1 flex flex-col ml-60 min-w-0">
-        <main className="flex-1 overflow-y-auto">
-          <Outlet />
+        <main className="flex-1 overflow-hidden relative">
+          {/* All pages stay mounted; CSS controls visibility to preserve in-progress state */}
+          <div className={["h-full overflow-y-auto", pathname === "/overview" ? "" : "hidden"].join(" ")}>
+            <OverviewPage />
+          </div>
+          <div className={["h-full overflow-hidden", pathname === "/problems" ? "" : "hidden"].join(" ")}>
+            <FindProblemsPage />
+          </div>
+          <div className={["h-full overflow-y-auto", pathname === "/types" ? "" : "hidden"].join(" ")}>
+            <FileTypesPage />
+          </div>
+          <div className={["h-full overflow-y-auto", pathname === "/settings" ? "" : "hidden"].join(" ")}>
+            <SettingsPage />
+          </div>
         </main>
       </div>
 

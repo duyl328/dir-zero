@@ -6,8 +6,8 @@ import DuplicatesTab from "../components/problems/DuplicatesTab";
 import StructureTab from "../components/problems/StructureTab";
 import ResidueTab from "../components/problems/ResidueTab";
 import { analyzeStructure } from "../analysis/structureAnalysis";
-import { analyzeResidue, BUILTIN_RESIDUE_RULES } from "../analysis/residueAnalysis";
-import type { ResidueRuleDef } from "../analysis/residueAnalysis";
+import { analyzeResidue, BUILTIN_RESIDUE_RULES, storedRuleToRuleDef } from "../analysis/residueAnalysis";
+import { useCustomResidueRules } from "../hooks/useCustomResidueRules";
 import type { FileEntry, RawDuplicateCluster, DuplicateCluster } from "../types";
 
 type Tab = "duplicates" | "structure" | "residue";
@@ -32,20 +32,25 @@ export default function FindProblemsPage() {
   const [tab, setTab] = useState<Tab>("residue");
   const [dupProgress, setDupProgress] = useState<{ processed: number; total: number } | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [customRules, setCustomRules] = useState<ResidueRuleDef[]>([]);
+  const [deletedPaths, setDeletedPaths] = useState<Set<string>>(new Set());
+  const { rules: customRules, addRule, removeRule, toggleEnabled } = useCustomResidueRules();
+  const cancelledRef = useRef(false);
 
-  // Reset all local state when a new scan session starts
+  // Reset per-session state when a new scan starts
   const prevSessionId = useRef(session.id);
   useEffect(() => {
     if (session.id !== prevSessionId.current) {
       prevSessionId.current = session.id;
       setRefreshKey(0);
-      setCustomRules([]);
+      setDeletedPaths(new Set());
       setDupProgress(null);
     }
   }, [session.id]);
 
-  const allFiles = useMemo(() => result ? collectFiles(result.tree) : [], [result, refreshKey]);
+  const allFiles = useMemo(
+    () => result ? collectFiles(result.tree).filter((f) => !deletedPaths.has(f.path)) : [],
+    [result, refreshKey, deletedPaths]
+  );
 
   const structureData = useMemo(
     () => result ? analyzeStructure(result.tree) : null,
@@ -53,7 +58,10 @@ export default function FindProblemsPage() {
   );
 
   const residueGroups = useMemo(
-    () => analyzeResidue(allFiles, [...BUILTIN_RESIDUE_RULES, ...customRules]),
+    () => analyzeResidue(allFiles, [
+      ...BUILTIN_RESIDUE_RULES,
+      ...customRules.filter((r) => r.enabled).map(storedRuleToRuleDef),
+    ]),
     [allFiles, customRules]
   );
 
@@ -66,6 +74,7 @@ export default function FindProblemsPage() {
 
   async function startDuplicateScan() {
     if (!result) return;
+    cancelledRef.current = false;
     setDuplicatesStatus("scanning");
     setDupProgress(null);
 
@@ -77,7 +86,11 @@ export default function FindProblemsPage() {
       const paths = allFiles.map((f) => f.path);
       const raw = await invoke<RawDuplicateCluster[]>("find_duplicates", { paths });
 
-      // Enrich with FileEntry data
+      if (cancelledRef.current) {
+        setDuplicatesStatus("idle");
+        return;
+      }
+
       const enriched: DuplicateCluster[] = raw.map((c) => ({
         id: c.id,
         hash: c.hash,
@@ -106,9 +119,15 @@ export default function FindProblemsPage() {
     }
   }
 
+  function cancelDuplicateScan() {
+    cancelledRef.current = true;
+    setDuplicatesStatus("cancelling");
+  }
+
   // Counts for tab badges
   const structureCount = structureData
-    ? structureData.emptyFolders.length + structureData.zeroByteFiles.length +
+    ? structureData.emptyFolders.filter((i) => !deletedPaths.has(i.path)).length +
+      structureData.zeroByteFiles.filter((i) => !deletedPaths.has(i.path)).length +
       structureData.pathIssues.length + structureData.singleChildChains.length + structureData.denseSmall.length
     : 0;
   const residueCount = residueGroups.reduce((s, g) => s + g.files.length, 0);
@@ -192,44 +211,46 @@ export default function FindProblemsPage() {
         </div>
       </div>
 
-      {/* Tab content */}
-      <div className="flex-1 overflow-y-auto">
-        {tab === "duplicates" && (
+      {/* Tab content — keep all tabs mounted to preserve in-progress state */}
+      <div className="flex-1 overflow-y-auto relative">
+        <div className={tab !== "duplicates" ? "hidden" : ""}>
           <DuplicatesTab
             clusters={duplicatesResult}
             status={duplicatesStatus}
             dupProgress={dupProgress}
             onScan={startDuplicateScan}
-            onDeleted={(deletedPaths) => {
+            onCancel={cancelDuplicateScan}
+            onDeleted={(paths) => {
               if (!duplicatesResult) return;
               const updated = duplicatesResult
-                .map((c) => ({
-                  ...c,
-                  files: c.files.filter((f) => !deletedPaths.has(f.path)),
-                }))
-                .map((c) => ({
-                  ...c,
-                  reclaimable: c.fileSize * Math.max(0, c.files.length - 1),
-                }))
+                .map((c) => ({ ...c, files: c.files.filter((f) => !paths.has(f.path)) }))
+                .map((c) => ({ ...c, reclaimable: c.fileSize * Math.max(0, c.files.length - 1) }))
                 .filter((c) => c.files.length >= 2);
               setDuplicatesResult(updated);
             }}
           />
+        </div>
+        {structureData && (
+          <div className={tab !== "structure" ? "hidden" : ""}>
+            <StructureTab
+              key={session.id}
+              data={structureData}
+              onRefresh={() => setRefreshKey((k) => k + 1)}
+              onDeleted={(paths) => setDeletedPaths((prev) => new Set([...prev, ...paths]))}
+            />
+          </div>
         )}
-        {tab === "structure" && structureData && (
-          <StructureTab
-            key={session.id}
-            data={structureData}
-            onRefresh={() => setRefreshKey((k) => k + 1)}
-          />
-        )}
-        {tab === "residue" && (
+        <div className={tab !== "residue" ? "hidden" : ""}>
           <ResidueTab
             groups={residueGroups}
+            customRules={customRules}
             onRefresh={() => setRefreshKey((k) => k + 1)}
-            onAddRule={(rule) => setCustomRules((prev) => [...prev, rule])}
+            onAddRule={addRule}
+            onToggleRule={toggleEnabled}
+            onRemoveRule={removeRule}
+            onDeleted={(paths) => setDeletedPaths((prev) => new Set([...prev, ...paths]))}
           />
-        )}
+        </div>
       </div>
     </div>
   );

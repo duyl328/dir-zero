@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { ScanSession, ScanStatus, ScanProgress, ScanResult, ExcludeRule, DuplicateCluster } from "../types";
 
-type DupStatus = "idle" | "scanning" | "done";
+type DupStatus = "idle" | "scanning" | "cancelling" | "done";
 
 interface AppState {
   session: ScanSession;

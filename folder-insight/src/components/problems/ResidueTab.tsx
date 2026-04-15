@@ -3,13 +3,17 @@ import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import ContextMenu from "../ui/ContextMenu";
 import { useToast } from "../../hooks/useToast";
-import type { ResidueGroup, ResidueRuleDef } from "../../analysis/residueAnalysis";
+import type { ResidueGroup, StoredCustomRule } from "../../analysis/residueAnalysis";
 import type { FileEntry } from "../../types";
 
 interface Props {
   groups: ResidueGroup[];
+  customRules: StoredCustomRule[];
   onRefresh: () => void;
-  onAddRule: (rule: ResidueRuleDef) => void;
+  onAddRule: (rule: StoredCustomRule) => void;
+  onToggleRule: (id: string) => void;
+  onRemoveRule: (id: string) => void;
+  onDeleted: (paths: Set<string>) => void;
 }
 
 function formatBytes(b: number) {
@@ -19,7 +23,7 @@ function formatBytes(b: number) {
 }
 
 function AddRuleForm({ onAdd, onCancel }: {
-  onAdd: (rule: ResidueRuleDef) => void;
+  onAdd: (rule: StoredCustomRule) => void;
   onCancel: () => void;
 }) {
   const [label, setLabel] = useState("");
@@ -34,12 +38,7 @@ function AddRuleForm({ onAdd, onCancel }: {
     if (useRegex) {
       try { new RegExp(p); } catch { setError("正则表达式无效"); return; }
     }
-    const matchFn: ResidueRuleDef["match"] = useRegex
-      ? (f) => new RegExp(p, "i").test(f.name)
-      : p.startsWith("*.")
-        ? (f) => f.ext.toLowerCase() === p.slice(2).toLowerCase()
-        : (f) => f.name.toLowerCase() === p.toLowerCase();
-    onAdd({ id: `custom-${Date.now()}`, label: l, desc: `自定义规则：${p}`, icon: "rule", defaultEnabled: true, match: matchFn });
+    onAdd({ id: `custom-${Date.now()}`, label: l, pattern: p, useRegex, enabled: true });
   }
 
   return (
@@ -85,7 +84,7 @@ function AddRuleForm({ onAdd, onCancel }: {
 
 interface CtxState { x: number; y: number; file: FileEntry }
 
-export default function ResidueTab({ groups: initialGroups, onRefresh, onAddRule }: Props) {
+export default function ResidueTab({ groups: initialGroups, customRules, onRefresh, onAddRule, onToggleRule, onRemoveRule, onDeleted }: Props) {
   const groups = initialGroups;
   const { show: showToast, ToastContainer } = useToast();
   const [selected, setSelected] = useState<Set<string>>(
@@ -148,6 +147,8 @@ export default function ResidueTab({ groups: initialGroups, onRefresh, onAddRule
         setDeleteProgress({ done, total: paths.length });
       }
 
+      const succeeded = new Set(paths.filter((p) => !failed.includes(p)));
+      onDeleted(succeeded);
       if (failed.length === 0) {
         showToast(`已移到回收站 ${paths.length} 个文件`, "check_circle");
       } else {
@@ -166,7 +167,7 @@ export default function ResidueTab({ groups: initialGroups, onRefresh, onAddRule
     setCtx({ x: e.clientX, y: e.clientY, file });
   }
 
-  if (visibleGroups.length === 0 && !showAddForm) {
+  if (visibleGroups.length === 0 && customRules.length === 0 && !showAddForm) {
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
         <span className="material-symbols-outlined text-4xl text-tertiary/60">check_circle</span>
@@ -321,20 +322,74 @@ export default function ResidueTab({ groups: initialGroups, onRefresh, onAddRule
         </div>
       )}
 
-      {showAddForm ? (
-        <AddRuleForm
-          onCancel={() => setShowAddForm(false)}
-          onAdd={(ruleDef) => { onAddRule(ruleDef); setShowAddForm(false); }}
-        />
-      ) : (
-        <button
-          onClick={() => setShowAddForm(true)}
-          className="w-full flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-outline-variant/30 rounded-xl text-sm font-semibold text-on-surface-variant hover:border-primary/30 hover:text-primary hover:bg-primary/5 transition-all mb-6"
-        >
-          <span className="material-symbols-outlined text-[18px]">add</span>
-          添加自定义规则（glob / 正则）
-        </button>
-      )}
+      {/* Custom rules — always visible section */}
+      <div className="mb-6">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/50">自定义规则</p>
+          {!showAddForm && (
+            <button
+              onClick={() => setShowAddForm(true)}
+              className="flex items-center gap-1 text-[10px] font-bold text-primary hover:underline"
+            >
+              <span className="material-symbols-outlined text-[13px]">add</span>
+              添加
+            </button>
+          )}
+        </div>
+
+        {showAddForm && (
+          <div className="mb-2">
+            <AddRuleForm
+              onCancel={() => setShowAddForm(false)}
+              onAdd={(rule) => { onAddRule(rule); setShowAddForm(false); }}
+            />
+          </div>
+        )}
+
+        {customRules.length === 0 && !showAddForm ? (
+          <p className="text-xs text-on-surface-variant/40 py-2">暂无自定义规则</p>
+        ) : customRules.length > 0 ? (
+          <div className="rounded-xl border border-outline-variant/10 bg-surface-container-lowest overflow-hidden">
+            {customRules.map((rule) => (
+              <div key={rule.id} className="flex items-center gap-3 px-4 py-2.5 border-b border-outline-variant/5 last:border-0 group">
+                <span className="material-symbols-outlined text-[15px] text-on-surface-variant/40 shrink-0">rule</span>
+                <div className="flex-1 min-w-0">
+                  <p className={["text-xs font-medium truncate", rule.enabled ? "text-on-surface" : "text-on-surface-variant/40"].join(" ")}>
+                    {rule.label}
+                  </p>
+                  <p className="text-[10px] font-mono text-on-surface-variant/40 truncate">
+                    {rule.useRegex ? "regex: " : ""}{rule.pattern}
+                    {!rule.enabled && <span className="ml-1 not-italic font-sans">· 已禁用</span>}
+                  </p>
+                </div>
+                {/* Toggle */}
+                <button
+                  onClick={() => onToggleRule(rule.id)}
+                  title={rule.enabled ? "点击禁用" : "点击启用"}
+                  className={[
+                    "shrink-0 rounded-full transition-colors overflow-hidden relative flex-none",
+                    rule.enabled ? "bg-primary" : "bg-surface-container-highest",
+                  ].join(" ")}
+                  style={{ width: 28, height: 16 }}
+                >
+                  <span
+                    className="absolute top-[2px] w-3 h-3 rounded-full bg-white shadow-sm transition-transform"
+                    style={{ left: 2, transform: rule.enabled ? "translateX(12px)" : "translateX(0)" }}
+                  />
+                </button>
+                {/* Delete */}
+                <button
+                  onClick={() => onRemoveRule(rule.id)}
+                  title="删除规则"
+                  className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 shrink-0"
+                >
+                  <span className="material-symbols-outlined text-[15px] text-on-surface-variant/50 hover:text-error transition-colors">delete_outline</span>
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
 
       {totalCount > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 glass-panel px-8 py-4 rounded-2xl shadow-2xl border border-white/30 flex items-center gap-8 z-50">

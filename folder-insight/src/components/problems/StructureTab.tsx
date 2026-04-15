@@ -8,6 +8,7 @@ import type { StructureAnalysisResult, StructureItem } from "../../analysis/stru
 interface Props {
   data: StructureAnalysisResult;
   onRefresh: () => void;
+  onDeleted: (paths: Set<string>) => void;
 }
 
 interface IssueCardProps {
@@ -161,7 +162,7 @@ function IssueCard({ icon, label, detail, severity, items, canDelete, selected, 
   );
 }
 
-export default function StructureTab({ data, onRefresh }: Props) {
+export default function StructureTab({ data, onRefresh, onDeleted }: Props) {
   const { show: showToast, ToastContainer } = useToast();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
@@ -226,6 +227,7 @@ export default function StructureTab({ data, onRefresh }: Props) {
         succeeded.forEach((p) => next.delete(p));
         return next;
       });
+      onDeleted(succeeded);
 
       if (failed.length === 0) {
         showToast(`已移到回收站 ${succeeded.size} 个项目`, "check_circle");

@@ -1,5 +1,23 @@
 import type { FileEntry } from "../types";
 
+export interface StoredCustomRule {
+  id: string;
+  label: string;
+  pattern: string;
+  useRegex: boolean;
+  enabled: boolean;
+}
+
+export function storedRuleToRuleDef(r: StoredCustomRule): ResidueRuleDef {
+  const p = r.pattern;
+  const matchFn: ResidueRuleDef["match"] = r.useRegex
+    ? (f) => new RegExp(p, "i").test(f.name)
+    : p.startsWith("*.")
+      ? (f) => f.ext.toLowerCase() === p.slice(2).toLowerCase()
+      : (f) => f.name.toLowerCase() === p.toLowerCase();
+  return { id: r.id, label: r.label, desc: `自定义规则：${p}`, icon: "rule", defaultEnabled: true, match: matchFn };
+}
+
 export interface ResidueRuleDef {
   id: string;
   label: string;
