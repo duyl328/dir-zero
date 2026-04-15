@@ -430,7 +430,11 @@ async fn find_duplicates(
     app: AppHandle,
     paths: Vec<String>,
 ) -> Result<Vec<DuplicateCluster>, String> {
-    // Group by size, skip zero-byte files
+    use rayon::prelude::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    // ── Phase 1: group by size (metadata only, very fast) ────────────────────
     let mut size_groups: HashMap<u64, Vec<String>> = HashMap::new();
     for path in &paths {
         if let Ok(meta) = std::fs::metadata(path) {
@@ -450,42 +454,78 @@ async fn find_duplicates(
         return Ok(vec![]);
     }
 
-    let total: usize = candidates.iter().map(|(_, p)| p.len()).sum();
-    let mut processed = 0usize;
-    let mut hash_groups: HashMap<String, Vec<String>> = HashMap::new();
+    let total_candidates: usize = candidates.iter().map(|(_, p)| p.len()).sum();
+    let processed = Arc::new(AtomicUsize::new(0));
 
-    for (size, paths) in &candidates {
-        // Quick hash pass
-        let mut quick: HashMap<Vec<u8>, Vec<String>> = HashMap::new();
-        for path in paths {
-            if let Some(h) = quick_hash(path, *size) {
-                quick.entry(h).or_default().push(path.clone());
-            }
-            processed += 1;
-            if processed % 100 == 0 {
-                let _ = app.emit("dup-progress", serde_json::json!({
-                    "processed": processed, "total": total
+    // ── Phase 2: quick hash in parallel (first 64 KB per file) ───────────────
+    // Flatten all candidate paths with their sizes for parallel processing
+    let flat: Vec<(u64, String)> = candidates
+        .iter()
+        .flat_map(|(size, paths)| paths.iter().map(move |p| (*size, p.clone())))
+        .collect();
+
+    let app_ref = &app;
+    let processed_ref = &processed;
+
+    let quick_results: Vec<(u64, String, Vec<u8>)> = flat
+        .par_iter()
+        .filter_map(|(size, path)| {
+            let h = quick_hash(path, *size)?;
+            let done = processed_ref.fetch_add(1, Ordering::Relaxed) + 1;
+            if done % 200 == 0 {
+                let _ = app_ref.emit("dup-progress", serde_json::json!({
+                    "processed": done, "total": total_candidates * 2
                 }));
             }
-        }
+            Some((*size, path.clone(), h))
+        })
+        .collect();
 
-        // Full hash only for quick-hash collisions
-        for (_, qpaths) in quick.into_iter().filter(|(_, p)| p.len() >= 2) {
-            for path in &qpaths {
-                if let Some(h) = full_hash(path) {
-                    let key = format!("{}-{}", size, h);
-                    hash_groups.entry(key).or_default().push(path.clone());
-                }
-            }
-        }
+    // Group by (size, quick_hash) to find quick-hash collisions
+    let mut quick_groups: HashMap<(u64, Vec<u8>), Vec<String>> = HashMap::new();
+    for (size, path, h) in quick_results {
+        quick_groups.entry((size, h)).or_default().push(path);
     }
 
+    let full_candidates: Vec<(u64, Vec<String>)> = quick_groups
+        .into_iter()
+        .filter(|(_, p)| p.len() >= 2)
+        .map(|((size, _quick_hash), paths)| (size, paths))
+        .collect();
+
+    // ── Phase 3: full hash in parallel (only quick-hash collisions) ──────────
+    let full_flat: Vec<(u64, String)> = full_candidates
+        .iter()
+        .flat_map(|(size, paths)| paths.iter().map(move |p| (*size, p.clone())))
+        .collect();
+
+    let full_results: Vec<(u64, String, String)> = full_flat
+        .par_iter()
+        .filter_map(|(size, path)| {
+            let h = full_hash(path)?;
+            let done = processed_ref.fetch_add(1, Ordering::Relaxed) + 1;
+            if done % 50 == 0 {
+                let _ = app_ref.emit("dup-progress", serde_json::json!({
+                    "processed": done, "total": total_candidates * 2
+                }));
+            }
+            Some((*size, path.clone(), h))
+        })
+        .collect();
+
+    // Group by (size, full_hash)
+    let mut hash_groups: HashMap<String, Vec<String>> = HashMap::new();
+    for (size, path, h) in full_results {
+        let key = format!("{}-{}", size, h);
+        hash_groups.entry(key).or_default().push(path);
+    }
+
+    // ── Build clusters ────────────────────────────────────────────────────────
     let mut clusters: Vec<DuplicateCluster> = hash_groups
         .into_iter()
         .filter(|(_, p)| p.len() >= 2)
         .enumerate()
         .map(|(i, (hash, mut file_paths))| {
-            // Sort newest-first for suggested keep
             file_paths.sort_by(|a, b| {
                 let ta = std::fs::metadata(a).and_then(|m| m.modified()).ok();
                 let tb = std::fs::metadata(b).and_then(|m| m.modified()).ok();
@@ -499,7 +539,9 @@ async fn find_duplicates(
         .collect();
 
     clusters.sort_by(|a, b| b.reclaimable.cmp(&a.reclaimable));
-    let _ = app.emit("dup-progress", serde_json::json!({ "processed": total, "total": total }));
+    let _ = app.emit("dup-progress", serde_json::json!({
+        "processed": total_candidates * 2, "total": total_candidates * 2
+    }));
     Ok(clusters)
 }
 

@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { DuplicateCluster } from "../../types";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import ContextMenu from "../ui/ContextMenu";
+import { useToast } from "../../hooks/useToast";
+import type { DuplicateCluster, FileEntry } from "../../types";
 
 type KeepStrategy = "newest" | "oldest" | "manual";
 
@@ -17,11 +20,17 @@ function formatBytes(b: number) {
   return `${(b / 1e9).toFixed(2)} GB`;
 }
 
+interface CtxState { x: number; y: number; file: FileEntry }
+
 export default function DuplicatesTab({ clusters, status, dupProgress, onScan }: Props) {
+  const { show: showToast, ToastContainer } = useToast();
   const [strategy, setStrategy] = useState<KeepStrategy>("newest");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // manual keep overrides: clusterId → path to keep
+  const [manualKeep, setManualKeep] = useState<Record<string, string>>({});
   const [deleting, setDeleting] = useState(false);
+  const [ctx, setCtx] = useState<CtxState | null>(null);
 
   if (status === "idle") {
     return (
@@ -66,16 +75,12 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan }:
           )}
         </div>
         <div className="w-64 h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
-          <div
-            className="h-full bg-primary rounded-full transition-all duration-300"
-            style={{ width: `${pct}%` }}
-          />
+          <div className="h-full bg-primary rounded-full transition-all duration-300" style={{ width: `${pct}%` }} />
         </div>
       </div>
     );
   }
 
-  // done
   if (!clusters || clusters.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
@@ -86,25 +91,29 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan }:
     );
   }
 
-  const totalSelected = clusters.filter((c) => selected.has(c.id)).reduce((s, c) => s + c.reclaimable, 0);
-
-  function getFilesToDelete(cluster: DuplicateCluster): string[] {
-    if (strategy === "newest") {
-      const sorted = [...cluster.files].sort((a, b) => b.modifiedAt - a.modifiedAt);
-      return sorted.slice(1).map((f) => f.path);
-    }
-    if (strategy === "oldest") {
-      const sorted = [...cluster.files].sort((a, b) => a.modifiedAt - b.modifiedAt);
-      return sorted.slice(1).map((f) => f.path);
-    }
-    // manual: delete all except suggestedKeep
-    return cluster.files.filter((f) => f.path !== cluster.suggestedKeep).map((f) => f.path);
+  function getKeepPath(cluster: DuplicateCluster): string {
+    if (strategy === "manual") return manualKeep[cluster.id] ?? cluster.suggestedKeep;
+    if (strategy === "newest") return [...cluster.files].sort((a, b) => b.modifiedAt - a.modifiedAt)[0]?.path ?? cluster.suggestedKeep;
+    return [...cluster.files].sort((a, b) => a.modifiedAt - b.modifiedAt)[0]?.path ?? cluster.suggestedKeep;
   }
+
+  function toggleCluster(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  const totalSelected = clusters.filter((c) => selected.has(c.id)).reduce((s, c) => s + c.reclaimable, 0);
 
   async function handleClean() {
     const paths = clusters!
       .filter((c) => selected.has(c.id))
-      .flatMap((c) => getFilesToDelete(c));
+      .flatMap((c) => {
+        const keep = getKeepPath(c);
+        return c.files.filter((f) => f.path !== keep).map((f) => f.path);
+      });
     if (paths.length === 0) return;
     setDeleting(true);
     try {
@@ -115,10 +124,16 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan }:
     }
   }
 
+  function openCtx(e: React.MouseEvent, file: FileEntry) {
+    e.preventDefault();
+    e.stopPropagation();
+    setCtx({ x: e.clientX, y: e.clientY, file });
+  }
+
   return (
-    <div className="px-8 py-6">
-      {/* Strategy selector */}
-      <div className="flex items-center gap-3 mb-6">
+    <div className="px-8 py-6 pb-28">
+      {/* Strategy + select-all row */}
+      <div className="flex items-center gap-3 mb-4 flex-wrap">
         <p className="text-xs font-bold text-on-surface-variant uppercase tracking-widest shrink-0">保留策略：</p>
         {(["newest", "oldest", "manual"] as KeepStrategy[]).map((s) => (
           <button
@@ -134,80 +149,126 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan }:
             {s === "newest" ? "保留最新" : s === "oldest" ? "保留最旧" : "手动选择"}
           </button>
         ))}
-        <button
-          onClick={() => setSelected(new Set())}
-          className="ml-auto text-xs text-on-surface-variant/50 hover:text-on-surface-variant transition-colors"
-        >
-          取消全选
-        </button>
+        {clusters.length > 1 && (
+          <button
+            onClick={() => setSelected(selected.size === clusters.length ? new Set() : new Set(clusters.map((c) => c.id)))}
+            className="ml-auto text-[10px] font-bold text-primary hover:underline"
+          >
+            {selected.size === clusters.length ? "取消全选" : "全选"}
+          </button>
+        )}
       </div>
 
-      <div className="space-y-3">
+      {strategy === "manual" && (
+        <p className="text-[10px] text-on-surface-variant/60 mb-4 bg-surface-container-low rounded-lg px-3 py-2">
+          手动模式：展开后点击任意文件将其标记为保留，其余副本将被删除。
+        </p>
+      )}
+
+      <div className="space-y-2">
         {clusters.map((cluster) => {
           const isExpanded = expanded === cluster.id;
           const isSelected = selected.has(cluster.id);
-          const toDelete = getFilesToDelete(cluster);
+          const keepPath = getKeepPath(cluster);
 
           return (
-            <div key={cluster.id} className="bg-surface-container-lowest rounded-xl border border-outline-variant/10 overflow-hidden">
-              <div className="flex items-center gap-4 p-4">
-                <input
-                  type="checkbox"
-                  checked={isSelected}
-                  onChange={() => setSelected((prev) => {
-                    const next = new Set(prev);
-                    next.has(cluster.id) ? next.delete(cluster.id) : next.add(cluster.id);
-                    return next;
-                  })}
-                  className="w-4 h-4 rounded border-outline-variant text-primary focus:ring-primary/20 shrink-0"
-                />
-                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                  <span className="material-symbols-outlined text-primary text-[18px]">file_copy</span>
+            <div
+              key={cluster.id}
+              className={[
+                "rounded-xl border overflow-hidden transition-all",
+                isSelected ? "border-primary/40 bg-primary/5" : "border-outline-variant/10 bg-surface-container-lowest",
+              ].join(" ")}
+            >
+              {/* Card header — click to expand */}
+              <div
+                className="flex items-center gap-3 p-4 cursor-pointer select-none"
+                onClick={() => setExpanded(isExpanded ? null : cluster.id)}
+              >
+                {/* Circle checkbox */}
+                <div
+                  className="shrink-0 flex items-center justify-center w-10 h-10 -ml-2 -my-2 rounded-lg cursor-pointer hover:bg-surface-container-high transition-colors"
+                  onClick={(e) => { e.stopPropagation(); toggleCluster(cluster.id); }}
+                  title={isSelected ? "取消选中" : "选中此组"}
+                >
+                  <span className={[
+                    "material-symbols-outlined text-[22px] transition-colors",
+                    isSelected ? "text-primary" : "text-on-surface-variant/30 hover:text-on-surface-variant",
+                  ].join(" ")}>
+                    {isSelected ? "check_circle" : "radio_button_unchecked"}
+                  </span>
                 </div>
+
+                {/* Icon */}
+                <div className={[
+                  "w-9 h-9 rounded-lg flex items-center justify-center shrink-0 transition-colors",
+                  isSelected ? "bg-primary/15 text-primary" : "bg-surface-container text-on-surface-variant",
+                ].join(" ")}>
+                  <span className="material-symbols-outlined text-[17px]">file_copy</span>
+                </div>
+
+                {/* Info */}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-on-surface truncate">
+                  <p className="text-sm font-semibold text-on-surface truncate leading-tight">
                     {cluster.files[0]?.name ?? "—"}
                   </p>
-                  <p className="text-xs text-on-surface-variant">
-                    {cluster.files.length} 个副本 ·{" "}
+                  <p className="text-xs text-on-surface-variant mt-0.5">
+                    {cluster.files.length} 个副本 · {formatBytes(cluster.fileSize)} 每个 ·{" "}
                     <span className="text-primary font-medium">{formatBytes(cluster.reclaimable)} 可回收</span>
                   </p>
                 </div>
-                <button
-                  onClick={() => setExpanded(isExpanded ? null : cluster.id)}
-                  className="p-1 text-on-surface-variant hover:text-on-surface transition-colors shrink-0"
+
+                {/* Expand indicator */}
+                <span
+                  className="material-symbols-outlined text-[18px] text-on-surface-variant/50 shrink-0 transition-transform"
+                  style={{ transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)" }}
                 >
-                  <span className="material-symbols-outlined text-[18px]">
-                    {isExpanded ? "expand_less" : "expand_more"}
-                  </span>
-                </button>
+                  expand_more
+                </span>
               </div>
 
+              {/* Expanded file list */}
               {isExpanded && (
                 <div className="border-t border-outline-variant/10">
                   {cluster.files.map((f) => {
-                    const willDelete = toDelete.includes(f.path);
+                    const willKeep = f.path === keepPath;
                     return (
                       <div
                         key={f.path}
+                        onContextMenu={(e) => openCtx(e, f)}
+                        onClick={() => {
+                          if (strategy === "manual") {
+                            setManualKeep((prev) => ({ ...prev, [cluster.id]: f.path }));
+                          }
+                        }}
                         className={[
-                          "flex items-center gap-4 px-6 py-3 border-b border-outline-variant/5 last:border-0",
-                          !willDelete ? "bg-tertiary-container/20" : "hover:bg-surface-container-high",
+                          "flex items-center gap-3 px-5 py-3 border-b border-outline-variant/5 last:border-0 transition-colors group",
+                          willKeep ? "bg-tertiary/5" : "hover:bg-surface-container-high",
+                          strategy === "manual" ? "cursor-pointer" : "",
                         ].join(" ")}
                       >
-                        <span className={`material-symbols-outlined text-[16px] shrink-0 ${!willDelete ? "text-tertiary" : "text-on-surface-variant/30"}`}>
-                          {!willDelete ? "shield" : "delete_outline"}
+                        <span className={[
+                          "material-symbols-outlined text-[16px] shrink-0 transition-colors",
+                          willKeep ? "text-tertiary" : "text-on-surface-variant/25",
+                        ].join(" ")}>
+                          {willKeep ? "shield" : "delete_outline"}
                         </span>
                         <div className="flex-1 min-w-0">
                           <p className="text-xs font-mono text-on-surface truncate">{f.path}</p>
-                          <p className="text-[10px] text-on-surface-variant">
+                          <p className="text-[10px] text-on-surface-variant mt-0.5">
                             {formatBytes(f.size)} · {new Date(f.modifiedAt).toLocaleDateString("zh-CN")}
                           </p>
                         </div>
-                        {!willDelete
+                        {willKeep
                           ? <span className="text-[10px] font-bold text-tertiary bg-tertiary/10 px-2 py-0.5 rounded-full shrink-0">保留</span>
-                          : <span className="text-[10px] font-bold text-error/70 shrink-0">删除</span>
+                          : <span className="text-[10px] font-bold text-error/60 shrink-0">删除</span>
                         }
+                        <button
+                          onClick={(e) => { e.stopPropagation(); revealItemInDir(f.path).catch(() => {}); }}
+                          title="在文件管理器中打开"
+                          className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 shrink-0"
+                        >
+                          <span className="material-symbols-outlined text-[14px] text-on-surface-variant/50 hover:text-primary transition-colors">open_in_new</span>
+                        </button>
                       </div>
                     );
                   })}
@@ -218,6 +279,7 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan }:
         })}
       </div>
 
+      {/* Floating action bar */}
       {selected.size > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 glass-panel px-8 py-4 rounded-2xl shadow-2xl border border-white/30 flex items-center gap-8 z-50">
           <div>
@@ -234,8 +296,7 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan }:
               取消
             </button>
             <button
-              onClick={handleClean}
-              disabled={deleting}
+              onClick={handleClean} disabled={deleting}
               className="cta-gradient px-7 py-2.5 rounded-lg text-sm font-bold text-on-primary shadow-lg shadow-primary/20 flex items-center gap-2 active:scale-95 duration-150 disabled:opacity-60"
             >
               <span className="material-symbols-outlined text-[18px]">delete_sweep</span>
@@ -244,6 +305,32 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan }:
           </div>
         </div>
       )}
+
+      {/* Context menu */}
+      {ctx && (
+        <ContextMenu
+          x={ctx.x} y={ctx.y}
+          onClose={() => setCtx(null)}
+          items={[
+            {
+              label: "复制文件名",
+              icon: "file_copy",
+              onClick: () => { navigator.clipboard.writeText(ctx.file.name); showToast("已复制文件名"); },
+            },
+            {
+              label: "复制完整路径",
+              icon: "content_copy",
+              onClick: () => { navigator.clipboard.writeText(ctx.file.path); showToast("已复制完整路径"); },
+            },
+            {
+              label: "在文件管理器中打开",
+              icon: "folder_open",
+              onClick: () => revealItemInDir(ctx.file.path).catch(() => {}),
+            },
+          ]}
+        />
+      )}
+      {ToastContainer}
     </div>
   );
 }
