@@ -165,10 +165,21 @@ export default function StructureTab({ data, onRefresh }: Props) {
   const { show: showToast, ToastContainer } = useToast();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+  const [deleteProgress, setDeleteProgress] = useState<{ done: number; total: number } | null>(null);
+  const [deletedPaths, setDeletedPaths] = useState<Set<string>>(new Set());
   const [ctx, setCtx] = useState<CtxState | null>(null);
 
-  const totalIssues = data.emptyFolders.length + data.zeroByteFiles.length +
-    data.pathIssues.length + data.singleChildChains.length + data.denseSmall.length;
+  // Filter out already-deleted items from each category
+  const filteredData = {
+    emptyFolders: data.emptyFolders.filter((i) => !deletedPaths.has(i.path)),
+    zeroByteFiles: data.zeroByteFiles.filter((i) => !deletedPaths.has(i.path)),
+    pathIssues: data.pathIssues,
+    singleChildChains: data.singleChildChains,
+    denseSmall: data.denseSmall,
+  };
+
+  const totalIssues = filteredData.emptyFolders.length + filteredData.zeroByteFiles.length +
+    filteredData.pathIssues.length + filteredData.singleChildChains.length + filteredData.denseSmall.length;
 
   function toggleItem(path: string) {
     setSelected((prev) => {
@@ -189,14 +200,42 @@ export default function StructureTab({ data, onRefresh }: Props) {
   }
 
   async function handleDelete() {
-    if (selected.size === 0) return;
+    const toDelete = Array.from(selected);
+    if (toDelete.length === 0) return;
+
     setDeleting(true);
+    setDeleteProgress({ done: 0, total: toDelete.length });
+
+    const BATCH = 20;
+    const failed: string[] = [];
+    let done = 0;
+
     try {
-      await invoke("move_to_trash", { paths: Array.from(selected) });
-      setSelected(new Set());
+      for (let i = 0; i < toDelete.length; i += BATCH) {
+        const batch = toDelete.slice(i, i + BATCH);
+        const batchFailed = await invoke<string[]>("move_to_trash", { paths: batch });
+        failed.push(...batchFailed);
+        done += batch.length;
+        setDeleteProgress({ done, total: toDelete.length });
+      }
+
+      const succeeded = new Set(toDelete.filter((p) => !failed.includes(p)));
+      setDeletedPaths((prev) => new Set([...prev, ...succeeded]));
+      setSelected((prev) => {
+        const next = new Set(prev);
+        succeeded.forEach((p) => next.delete(p));
+        return next;
+      });
+
+      if (failed.length === 0) {
+        showToast(`已移到回收站 ${succeeded.size} 个项目`, "check_circle");
+      } else {
+        showToast(`完成，${failed.length} 个项目失败`, "warning");
+      }
       onRefresh();
     } finally {
       setDeleting(false);
+      setDeleteProgress(null);
     }
   }
 
@@ -226,48 +265,72 @@ export default function StructureTab({ data, onRefresh }: Props) {
 
       <IssueCard icon="folder_off" label="空文件夹" severity="safe"
         detail="完全空的目录，无任何文件或子文件夹"
-        items={data.emptyFolders} canDelete {...cardProps} />
+        items={filteredData.emptyFolders} canDelete {...cardProps} />
 
       <IssueCard icon="draft" label="零字节文件" severity="safe"
         detail="大小为 0 字节的文件，通常是失败下载或崩溃残留"
-        items={data.zeroByteFiles} canDelete {...cardProps} />
+        items={filteredData.zeroByteFiles} canDelete {...cardProps} />
 
       <IssueCard icon="straighten" label="路径问题" severity="caution"
         detail="超长路径（>200 字符）或深层嵌套（>8 层），可能影响兼容性"
-        items={data.pathIssues} {...cardProps} />
+        items={filteredData.pathIssues} {...cardProps} />
 
       <IssueCard icon="linear_scale" label="单子目录链" severity="caution"
         detail="连续只含一个子文件夹的目录链，形成冗余嵌套"
-        items={data.singleChildChains} {...cardProps} />
+        items={filteredData.singleChildChains} {...cardProps} />
 
       <IssueCard icon="grain" label="小文件过密" severity="caution"
         detail="文件数量极多但总体积小，可能是构建产物或缓存"
-        items={data.denseSmall} {...cardProps} />
+        items={filteredData.denseSmall} {...cardProps} />
 
       {/* Floating action bar */}
       {selected.size > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 glass-panel px-8 py-4 rounded-2xl shadow-2xl border border-white/30 flex items-center gap-8 z-50">
-          <div>
-            <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">已选中</p>
-            <p className="font-headline text-lg font-extrabold text-on-surface">
-              {selected.size.toLocaleString()} 个项目
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setSelected(new Set())}
-              className="px-5 py-2.5 rounded-lg text-sm font-semibold text-on-surface-variant hover:bg-surface-container-high transition-colors"
-            >
-              取消
-            </button>
-            <button
-              onClick={handleDelete} disabled={deleting}
-              className="cta-gradient px-7 py-2.5 rounded-lg text-sm font-bold text-on-primary shadow-lg shadow-primary/20 flex items-center gap-2 active:scale-95 duration-150 disabled:opacity-60"
-            >
-              <span className="material-symbols-outlined text-[18px]">delete_sweep</span>
-              {deleting ? "处理中…" : "移到回收站"}
-            </button>
-          </div>
+          {deleting && deleteProgress ? (
+            <div className="flex items-center gap-5">
+              <div>
+                <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">正在移到回收站</p>
+                <p className="font-headline text-lg font-extrabold text-on-surface">
+                  {deleteProgress.done} / {deleteProgress.total} 个项目
+                </p>
+              </div>
+              <div className="w-40">
+                <div className="h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary rounded-full transition-all duration-200"
+                    style={{ width: `${Math.round((deleteProgress.done / deleteProgress.total) * 100)}%` }}
+                  />
+                </div>
+                <p className="text-[10px] text-on-surface-variant/50 mt-1 text-right">
+                  {Math.round((deleteProgress.done / deleteProgress.total) * 100)}%
+                </p>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div>
+                <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">已选中</p>
+                <p className="font-headline text-lg font-extrabold text-on-surface">
+                  {selected.size.toLocaleString()} 个项目
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setSelected(new Set())}
+                  className="px-5 py-2.5 rounded-lg text-sm font-semibold text-on-surface-variant hover:bg-surface-container-high transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleDelete} disabled={deleting}
+                  className="cta-gradient px-7 py-2.5 rounded-lg text-sm font-bold text-on-primary shadow-lg shadow-primary/20 flex items-center gap-2 active:scale-95 duration-150 disabled:opacity-60"
+                >
+                  <span className="material-symbols-outlined text-[18px]">delete_sweep</span>
+                  移到回收站
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
 

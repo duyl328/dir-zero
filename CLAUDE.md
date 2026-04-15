@@ -90,8 +90,27 @@ Squarified treemap on a `<canvas>`. Key details:
 
 Shows a proportional colour bar + legend from real scan data. If `unknown` occupies ≥ 15% of total size, a second row expands showing the top-8 extensions within Unknown as pill badges (e.g. `.glb 42%`).
 
+### FindProblemsPage
+
+Three-tab layout: `DuplicatesTab`, `StructureTab`, `ResidueTab`.
+
+**Duplicates flow** mirrors the main scan flow:
+1. `FindProblemsPage` calls `invoke("find_duplicates", { paths })` with the scan roots
+2. Rust emits `"dup-progress"` events; frontend listens and updates `duplicatesStatus` in the store
+3. On completion, raw results are enriched via a `fileMap` (path → `FileEntry`) built from the existing scan tree, then stored as `duplicatesResult`
+
+**Structure & Residue analysis** run entirely in the frontend:
+- `src/components/problems/structureAnalysis.ts` — heuristic checks on the folder tree
+- `src/components/problems/residueAnalysis.ts` — matches against `BUILTIN_RESIDUE_RULES` (glob patterns for known leftover paths)
+
+The store holds `duplicatesResult` and `duplicatesStatus` alongside the main `ScanSession`.
+
 ### Scanning modes
 
 `ScanProgress.mode`:
 - `"compat"` — current implementation (`std::fs::read_dir` recursive)
 - `"mft"` — planned fast NTFS MFT scan (not yet implemented)
+
+### Styling
+
+Tailwind CSS with a custom Material Design 3 palette defined in `tailwind.config.js` — use the semantic tokens (`primary`, `secondary`, `tertiary`, `error`, `surface-*`) rather than raw Tailwind colours. TypeScript is configured with `strict: true`, `noUnusedLocals`, and `noUnusedParameters` — the type-check command (`npx tsc --noEmit`) must stay clean.

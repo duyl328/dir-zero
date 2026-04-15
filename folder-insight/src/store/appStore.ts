@@ -67,7 +67,7 @@ export const useAppStore = create<AppState>((set) => ({
     set((s) => ({ session: { ...s.session, result, status: "done" } })),
 
   resetSession: () =>
-    set({ session: { ...defaultSession, id: crypto.randomUUID() } }),
+    set({ session: { ...defaultSession, id: crypto.randomUUID() }, duplicatesResult: null, duplicatesStatus: "idle" }),
 
   toggleExcludeRule: (id) =>
     set((s) => ({

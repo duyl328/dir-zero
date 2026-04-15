@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useAppStore } from "../store/appStore";
@@ -33,6 +33,17 @@ export default function FindProblemsPage() {
   const [dupProgress, setDupProgress] = useState<{ processed: number; total: number } | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [customRules, setCustomRules] = useState<ResidueRuleDef[]>([]);
+
+  // Reset all local state when a new scan session starts
+  const prevSessionId = useRef(session.id);
+  useEffect(() => {
+    if (session.id !== prevSessionId.current) {
+      prevSessionId.current = session.id;
+      setRefreshKey(0);
+      setCustomRules([]);
+      setDupProgress(null);
+    }
+  }, [session.id]);
 
   const allFiles = useMemo(() => result ? collectFiles(result.tree) : [], [result, refreshKey]);
 
@@ -207,6 +218,7 @@ export default function FindProblemsPage() {
         )}
         {tab === "structure" && structureData && (
           <StructureTab
+            key={session.id}
             data={structureData}
             onRefresh={() => setRefreshKey((k) => k + 1)}
           />

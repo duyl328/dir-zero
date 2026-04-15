@@ -93,6 +93,7 @@ export default function ResidueTab({ groups: initialGroups, onRefresh, onAddRule
   );
   const [expanded, setExpanded] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [deleteProgress, setDeleteProgress] = useState<{ done: number; total: number } | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
   const [showExcluded, setShowExcluded] = useState(false);
@@ -130,12 +131,32 @@ export default function ResidueTab({ groups: initialGroups, onRefresh, onAddRule
   async function handleClean() {
     const paths = activeGroups.flatMap((g) => g.files.map((f: FileEntry) => f.path));
     if (paths.length === 0) return;
+
     setDeleting(true);
+    setDeleteProgress({ done: 0, total: paths.length });
+
+    const BATCH = 20;
+    const failed: string[] = [];
+    let done = 0;
+
     try {
-      await invoke("move_to_trash", { paths });
+      for (let i = 0; i < paths.length; i += BATCH) {
+        const batch = paths.slice(i, i + BATCH);
+        const batchFailed = await invoke<string[]>("move_to_trash", { paths: batch });
+        failed.push(...batchFailed);
+        done += batch.length;
+        setDeleteProgress({ done, total: paths.length });
+      }
+
+      if (failed.length === 0) {
+        showToast(`已移到回收站 ${paths.length} 个文件`, "check_circle");
+      } else {
+        showToast(`完成，${failed.length} 个文件失败`, "warning");
+      }
       onRefresh();
     } finally {
       setDeleting(false);
+      setDeleteProgress(null);
     }
   }
 
@@ -317,19 +338,43 @@ export default function ResidueTab({ groups: initialGroups, onRefresh, onAddRule
 
       {totalCount > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 glass-panel px-8 py-4 rounded-2xl shadow-2xl border border-white/30 flex items-center gap-8 z-50">
-          <div>
-            <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">已选中</p>
-            <p className="font-headline text-lg font-extrabold text-on-surface">
-              {formatBytes(totalSize)} · {totalCount.toLocaleString()} 个文件
-            </p>
-          </div>
-          <button
-            onClick={handleClean} disabled={deleting}
-            className="cta-gradient px-7 py-2.5 rounded-lg text-sm font-bold text-on-primary shadow-lg shadow-primary/20 flex items-center gap-2 active:scale-95 duration-150 disabled:opacity-60"
-          >
-            <span className="material-symbols-outlined text-[18px]">delete_sweep</span>
-            {deleting ? "处理中…" : "移到回收站"}
-          </button>
+          {deleting && deleteProgress ? (
+            <div className="flex items-center gap-5">
+              <div>
+                <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">正在移到回收站</p>
+                <p className="font-headline text-lg font-extrabold text-on-surface">
+                  {deleteProgress.done} / {deleteProgress.total} 个文件
+                </p>
+              </div>
+              <div className="w-40">
+                <div className="h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary rounded-full transition-all duration-200"
+                    style={{ width: `${Math.round((deleteProgress.done / deleteProgress.total) * 100)}%` }}
+                  />
+                </div>
+                <p className="text-[10px] text-on-surface-variant/50 mt-1 text-right">
+                  {Math.round((deleteProgress.done / deleteProgress.total) * 100)}%
+                </p>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div>
+                <p className="text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">已选中</p>
+                <p className="font-headline text-lg font-extrabold text-on-surface">
+                  {formatBytes(totalSize)} · {totalCount.toLocaleString()} 个文件
+                </p>
+              </div>
+              <button
+                onClick={handleClean} disabled={deleting}
+                className="cta-gradient px-7 py-2.5 rounded-lg text-sm font-bold text-on-primary shadow-lg shadow-primary/20 flex items-center gap-2 active:scale-95 duration-150 disabled:opacity-60"
+              >
+                <span className="material-symbols-outlined text-[18px]">delete_sweep</span>
+                移到回收站
+              </button>
+            </>
+          )}
         </div>
       )}
 
