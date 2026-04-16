@@ -1,5 +1,6 @@
+import { invoke } from "@tauri-apps/api/core";
 import { create } from "zustand";
-import type { ScanSession, ScanStatus, ScanProgress, ScanResult, ExcludeRule, DuplicateCluster } from "../types";
+import type { ScanSession, ScanStatus, ScanProgress, SlimScanResult, FileEntry, FileChunk, ExcludeRule, DuplicateCluster } from "../types";
 import type { Locale } from "../i18n";
 
 type DupStatus = "idle" | "scanning" | "cancelling" | "done";
@@ -17,11 +18,16 @@ interface AppState {
   locale: Locale;
   theme: Theme;
 
+  // Lazy-loaded flat file list (background chunk loading after scan)
+  allFiles: FileEntry[] | null;
+  filesLoading: boolean;
+  filesTotal: number;
+
   // Actions
   setScanRoots: (roots: string[]) => void;
   setScanStatus: (status: ScanStatus) => void;
   setScanProgress: (progress: ScanProgress) => void;
-  setScanResult: (result: ScanResult) => void;
+  setScanResult: (result: SlimScanResult) => void;
   resetSession: () => void;
   toggleExcludeRule: (id: string) => void;
   addExcludeRule: (rule: ExcludeRule) => void;
@@ -52,7 +58,25 @@ const builtinRules: ExcludeRule[] = [
   { id: "b-sysvolinfo", pattern: "System Volume Information", type: "path", enabled: true, builtin: true, label: "系统卷信息" },
 ];
 
-export const useAppStore = create<AppState>((set) => {
+const CHUNK_SIZE = 50_000;
+
+async function loadFilesInBackground(
+  total: number,
+  onDone: (files: FileEntry[]) => void,
+) {
+  const all: FileEntry[] = [];
+  all.length = 0;
+  let offset = 0;
+  while (offset < total) {
+    const chunk = await invoke<FileChunk>("get_files_chunk", { offset, limit: CHUNK_SIZE });
+    if (chunk.files.length === 0) break;
+    for (const f of chunk.files) all.push(f);
+    offset += chunk.files.length;
+  }
+  onDone(all);
+}
+
+export const useAppStore = create<AppState>((set, _get) => {
   const savedTheme = (localStorage.getItem("theme") as Theme | null) ?? "light";
   applyTheme(savedTheme);
 
@@ -63,6 +87,9 @@ export const useAppStore = create<AppState>((set) => {
   duplicatesStatus: "idle",
   locale: (localStorage.getItem("locale") as Locale | null) ?? "zh",
   theme: savedTheme,
+  allFiles: null,
+  filesLoading: false,
+  filesTotal: 0,
 
   setScanRoots: (roots) =>
     set((s) => ({ session: { ...s.session, roots } })),
@@ -79,11 +106,29 @@ export const useAppStore = create<AppState>((set) => {
   setScanProgress: (progress) =>
     set((s) => ({ session: { ...s.session, progress } })),
 
-  setScanResult: (result) =>
-    set((s) => ({ session: { ...s.session, result, status: "done" } })),
+  setScanResult: (result) => {
+    set((s) => ({
+      session: { ...s.session, result, status: "done" },
+      allFiles: null,
+      filesLoading: true,
+      filesTotal: result.fileCount,
+    }));
+    // Start background chunk loading — only one set() call when all done
+    loadFilesInBackground(
+      result.fileCount,
+      (files) => set({ allFiles: files, filesLoading: false }),
+    );
+  },
 
   resetSession: () =>
-    set({ session: { ...defaultSession, id: crypto.randomUUID() }, duplicatesResult: null, duplicatesStatus: "idle" }),
+    set({
+      session: { ...defaultSession, id: crypto.randomUUID() },
+      duplicatesResult: null,
+      duplicatesStatus: "idle",
+      allFiles: null,
+      filesLoading: false,
+      filesTotal: 0,
+    }),
 
   toggleExcludeRule: (id) =>
     set((s) => ({

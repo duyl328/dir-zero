@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useAppStore } from "../../store/appStore";
 import { useT } from "../../hooks/useT";
-import type { ScanResult, ScanProgress } from "../../types";
+import type { SlimScanResult, ScanProgress } from "../../types";
 
 export default function ScanConfigModal() {
   const { session, setScanRoots, setScanStatus, setScanProgress, setScanResult, excludeRules, toggleExcludeRule, resetSession } = useAppStore();
@@ -38,7 +38,7 @@ export default function ScanConfigModal() {
     });
 
     try {
-      const result = await invoke<ScanResult>("scan_folder", {
+      const result = await invoke<SlimScanResult>("scan_folder", {
         roots,
         excludeRules: excludeRules.filter((r) => r.enabled),
       });

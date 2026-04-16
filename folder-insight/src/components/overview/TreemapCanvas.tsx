@@ -1,31 +1,37 @@
-import { useRef, useEffect, useState, useMemo } from "react";
+import { useRef, useEffect, useState, useMemo, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
-import type { FolderEntry, FolderChild } from "../../types";
+import type { SlimFolderEntry, FolderChild, FileEntry } from "../../types";
 import ContextMenu from "../ui/ContextMenu";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+// A unified child type for the treemap: either a slim folder or a file leaf
+type TreeChild =
+  | ({ kind: "folder" } & SlimFolderEntry)
+  | ({ kind: "file" } & FileEntry);
+
 interface Rect {
   x: number; y: number; w: number; h: number;
-  child: FolderChild;
+  child: TreeChild;
 }
 
 interface DrawRect extends Rect {
-  depth: number; // 0 = top level, 1 = inside an expanded folder, ...
+  depth: number;
 }
 
 interface Props {
-  root: FolderEntry;
+  root: SlimFolderEntry;
   colorMode: "type" | "age";
   selected: FolderChild | null;
   onSelect: (node: FolderChild | null) => void;
-  stack: FolderEntry[];
-  onStackChange: (stack: FolderEntry[]) => void;
+  stack: SlimFolderEntry[];
+  onStackChange: (stack: SlimFolderEntry[]) => void;
 }
 
 // ── Squarified treemap algorithm ─────────────────────────────────────────────
 
-function squarify(children: FolderChild[], x: number, y: number, w: number, h: number): Rect[] {
+function squarify(children: TreeChild[], x: number, y: number, w: number, h: number): Rect[] {
   const total = children.reduce((s, c) => s + c.size, 0);
   if (total === 0 || !children.length) return [];
   const out: Rect[] = [];
@@ -33,10 +39,10 @@ function squarify(children: FolderChild[], x: number, y: number, w: number, h: n
   return out;
 }
 
-function layoutStrip(items: FolderChild[], x: number, y: number, w: number, h: number, total: number, out: Rect[]) {
+function layoutStrip(items: TreeChild[], x: number, y: number, w: number, h: number, total: number, out: Rect[]) {
   if (!items.length || total === 0) return;
   const normalize = (s: number) => (s / total) * w * h;
-  let strip: FolderChild[] = [], stripSize = 0, i = 0;
+  let strip: TreeChild[] = [], stripSize = 0, i = 0;
   while (i < items.length) {
     const item = items[i];
     const ns = [...strip, item], nz = stripSize + item.size;
@@ -52,7 +58,7 @@ function layoutStrip(items: FolderChild[], x: number, y: number, w: number, h: n
   placeStrip(strip, stripSize, x, y, w, h, normalize, out);
 }
 
-function worstRatio(strip: FolderChild[], sz: number, w: number, h: number, N: (s: number) => number) {
+function worstRatio(strip: TreeChild[], sz: number, w: number, h: number, N: (s: number) => number) {
   if (!strip.length || sz === 0) return Infinity;
   const tot = N(sz), sh = Math.min(w, h), sl = tot / sh;
   return Math.max(...strip.map(c => { const iw = N(c.size) / sl; return Math.max(sl / iw, iw / sl); }));
@@ -63,7 +69,7 @@ function nextSlice(sz: number, x: number, y: number, w: number, h: number, N: (s
   return w >= h ? [x + tot / h, y, w - tot / h, h] : [x, y + tot / w, w, h - tot / w];
 }
 
-function placeStrip(strip: FolderChild[], sz: number, x: number, y: number, w: number, h: number, N: (s: number) => number, out: Rect[]) {
+function placeStrip(strip: TreeChild[], sz: number, x: number, y: number, w: number, h: number, N: (s: number) => number, out: Rect[]) {
   const tot = N(sz); let cur = 0;
   if (w >= h) { const sw = tot / h; for (const c of strip) { const rh = N(c.size) / sw; out.push({ x, y: y + cur, w: sw, h: rh, child: c }); cur += rh; } }
   else { const sh = tot / w; for (const c of strip) { const rw = N(c.size) / sh; out.push({ x: x + cur, y, w: rw, h: sh, child: c }); cur += rw; } }
@@ -75,7 +81,7 @@ const EXPAND_HEADER = 22; // px — height of expanded folder's title strip
 const PAD = 3;
 
 function computeAllRects(
-  children: FolderChild[],
+  children: TreeChild[],
   x: number, y: number, w: number, h: number,
   depth: number,
   expanded: Set<string>
@@ -88,8 +94,11 @@ function computeAllRects(
     if (r.child.kind === "folder" && expanded.has(r.child.path) && r.child.children.length > 0) {
       const sx = r.x + PAD, sy = r.y + EXPAND_HEADER;
       const sw = r.w - PAD * 2, sh = r.h - EXPAND_HEADER - PAD;
-      if (sw > 8 && sh > 8)
-        all.push(...computeAllRects(r.child.children, sx, sy, sw, sh, depth + 1, expanded));
+      if (sw > 8 && sh > 8) {
+        // Slim folder children are SlimFolderEntry — wrap as TreeChild
+        const subChildren: TreeChild[] = r.child.children.map((c) => ({ kind: "folder" as const, ...c }));
+        all.push(...computeAllRects(subChildren, sx, sy, sw, sh, depth + 1, expanded));
+      }
     }
   }
   return all;
@@ -98,7 +107,7 @@ function computeAllRects(
 // ── Color helpers ─────────────────────────────────────────────────────────────
 
 // Auto-expand folders whose initial rect is large enough to show children meaningfully
-function getAutoExpanded(children: FolderChild[], w: number, h: number): Set<string> {
+function getAutoExpanded(children: TreeChild[], w: number, h: number): Set<string> {
   const result = new Set<string>();
   const rects = squarify(children, 0, 0, w, h);
   for (const r of rects) {
@@ -125,7 +134,7 @@ function folderColor(name: string): string {
   return FOLDER_COLORS[Math.abs(h) % FOLDER_COLORS.length];
 }
 
-function nodeColor(child: FolderChild, colorMode: "type" | "age"): string {
+function nodeColor(child: TreeChild, colorMode: "type" | "age"): string {
   if (child.kind === "folder") return colorMode === "age" ? "#64748b" : folderColor(child.name);
   if (colorMode === "age") {
     const d = (Date.now() - child.modifiedAt) / 86400000;
@@ -140,16 +149,26 @@ function formatBytes(b: number): string {
   return `${(b / 1e9).toFixed(2)} GB`;
 }
 
-// Truncate text with ellipsis instead of letting canvas compress it
-function truncateText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
+// Truncate text with ellipsis instead of letting canvas compress it.
+// cache: per-draw Map keyed by "${font}|${text}" to avoid redundant measureText calls.
+function truncateText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, cache: Map<string, number>): string {
   if (maxWidth <= 0) return "";
-  if (ctx.measureText(text).width <= maxWidth) return text;
-  const ellipsisW = ctx.measureText("…").width;
+  const font = ctx.font;
+  const measure = (s: string) => {
+    const k = `${font}|${s}`;
+    const cached = cache.get(k);
+    if (cached !== undefined) return cached;
+    const w = ctx.measureText(s).width;
+    cache.set(k, w);
+    return w;
+  };
+  if (measure(text) <= maxWidth) return text;
+  const ellipsisW = measure("…");
   if (ellipsisW >= maxWidth) return "";
   let lo = 0, hi = text.length;
   while (lo < hi) {
     const mid = Math.ceil((lo + hi) / 2);
-    if (ctx.measureText(text.slice(0, mid)).width + ellipsisW <= maxWidth) lo = mid;
+    if (measure(text.slice(0, mid)) + ellipsisW <= maxWidth) lo = mid;
     else hi = mid - 1;
   }
   return lo === 0 ? "" : text.slice(0, lo) + "…";
@@ -174,11 +193,50 @@ export default function TreemapCanvas({ root, colorMode, selected, onSelect, sta
   const containerRef = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState<number | null>(null);
   const [dims, setDims] = useState({ w: 0, h: 0 });
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; child: FolderChild } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; child: TreeChild } | null>(null);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const initializedPathRef = useRef<string | null>(null);
 
+  // Cache of lazy-loaded file leaves per folder path
+  const fileCacheRef = useRef<Map<string, FileEntry[]>>(new Map());
+
+  // Text measurement cache — cleared each draw to stay in sync with font/dpr changes
+  const measureCacheRef = useRef<Map<string, number>>(new Map());
+
+  // RAF throttle refs for mousemove hit-testing
+  const rafPendingRef = useRef(false);
+  const mousePosRef = useRef({ x: 0, y: 0 });
+
   const current = stack[stack.length - 1] ?? root;
+
+  // Build TreeChild[] for the current folder (slim folder children only — files not in slim tree)
+  const currentChildren = useMemo<TreeChild[]>(
+    () => current.children.map((c) => ({ kind: "folder" as const, ...c })),
+    [current]
+  );
+
+  // Lazy-load file leaves for the current folder and merge into children
+  const [fileLeaves, setFileLeaves] = useState<FileEntry[]>([]);
+  const loadFiles = useCallback(async (folderPath: string) => {
+    if (fileCacheRef.current.has(folderPath)) {
+      setFileLeaves(fileCacheRef.current.get(folderPath)!);
+      return;
+    }
+    try {
+      const files = await invoke<FileEntry[]>("get_folder_files", { path: folderPath });
+      fileCacheRef.current.set(folderPath, files);
+      setFileLeaves(files);
+    } catch {
+      setFileLeaves([]);
+    }
+  }, []);
+
+  useEffect(() => { loadFiles(current.path); }, [current.path, loadFiles]);
+
+  const allChildren = useMemo<TreeChild[]>(() => {
+    const fileChildren: TreeChild[] = fileLeaves.map((f) => ({ kind: "file" as const, ...f }));
+    return [...currentChildren, ...fileChildren].sort((a, b) => b.size - a.size);
+  }, [currentChildren, fileLeaves]);
 
   // Reset when root changes
   useEffect(() => { onStackChange([root]); }, [root]);
@@ -188,8 +246,8 @@ export default function TreemapCanvas({ root, colorMode, selected, onSelect, sta
     if (dims.w === 0 || dims.h === 0) return;
     if (initializedPathRef.current === current.path) return;
     initializedPathRef.current = current.path;
-    setExpandedPaths(getAutoExpanded(current.children, dims.w, dims.h));
-  }, [current.path, dims.w, dims.h]);
+    setExpandedPaths(getAutoExpanded(currentChildren, dims.w, dims.h));
+  }, [current.path, dims.w, dims.h, currentChildren]);
 
   // Resize observer
   useEffect(() => {
@@ -202,12 +260,12 @@ export default function TreemapCanvas({ root, colorMode, selected, onSelect, sta
   }, []);
 
   // All drawable rects (memoized by a string key of expanded set)
-  const expandedKey = useMemo(() => [...expandedPaths].sort().join("|"), [expandedPaths]);
+  const expandedKey = useMemo(() => [...expandedPaths].join("|"), [expandedPaths]);
   const allRects = useMemo<DrawRect[]>(() => {
     if (dims.w === 0 || dims.h === 0) return [];
-    return computeAllRects(current.children, 0, 0, dims.w, dims.h, 0, expandedPaths);
+    return computeAllRects(allChildren, 0, 0, dims.w, dims.h, 0, expandedPaths);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dims, current, expandedKey]);
+  }, [dims, allChildren, expandedKey]);
 
   // Keep a ref for event handlers to avoid stale closure issues
   const allRectsRef = useRef(allRects);
@@ -224,6 +282,10 @@ export default function TreemapCanvas({ root, colorMode, selected, onSelect, sta
     const ctx = canvas.getContext("2d")!;
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, dims.w, dims.h);
+
+    // Clear text measurement cache — font/dpr may have changed
+    measureCacheRef.current.clear();
+    const mc = measureCacheRef.current;
 
     // Draw in depth order so sub-rects appear on top of their parents
     const sorted = [...allRects].sort((a, b) => a.depth - b.depth);
@@ -257,7 +319,7 @@ export default function TreemapCanvas({ root, colorMode, selected, onSelect, sta
         ctx.font = `bold 11px Inter, system-ui, sans-serif`;
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
-        const tHeaderName = truncateText(ctx, name, headerTextW);
+        const tHeaderName = truncateText(ctx, name, headerTextW, mc);
         if (tHeaderName) ctx.fillText(tHeaderName, x + PAD + 6, y + PAD + (EXPAND_HEADER - PAD) / 2);
         // Collapse indicator
         ctx.font = `12px "Material Symbols Outlined", system-ui, sans-serif`;
@@ -286,16 +348,16 @@ export default function TreemapCanvas({ root, colorMode, selected, onSelect, sta
             const sizeY = nameY + fontSize / 2 + gap + sf / 2;
             ctx.font = `bold ${fontSize}px Inter, system-ui, sans-serif`;
             ctx.fillStyle = "#ffffff"; ctx.globalAlpha = 0.95;
-            const tName = truncateText(ctx, name, innerW);
+            const tName = truncateText(ctx, name, innerW, mc);
             if (tName) ctx.fillText(tName, cx, nameY);
             ctx.font = `${sf}px Inter, system-ui, sans-serif`;
             ctx.globalAlpha = 0.65;
-            const tSize = truncateText(ctx, sizeStr, innerW);
+            const tSize = truncateText(ctx, sizeStr, innerW, mc);
             if (tSize) ctx.fillText(tSize, cx, sizeY);
           } else {
             ctx.font = `bold ${fontSize}px Inter, system-ui, sans-serif`;
             ctx.fillStyle = "#ffffff"; ctx.globalAlpha = 0.95;
-            const tName = truncateText(ctx, name, innerW);
+            const tName = truncateText(ctx, name, innerW, mc);
             if (tName) ctx.fillText(tName, cx, cy);
           }
           ctx.globalAlpha = 1; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
@@ -340,8 +402,14 @@ export default function TreemapCanvas({ root, colorMode, selected, onSelect, sta
 
   function handleMouseMove(e: React.MouseEvent<HTMLCanvasElement>) {
     const r = canvasRef.current!.getBoundingClientRect();
-    const idx = getDeepestAt(e.clientX - r.left, e.clientY - r.top);
-    setHovered(idx);
+    mousePosRef.current = { x: e.clientX - r.left, y: e.clientY - r.top };
+    if (rafPendingRef.current) return;
+    rafPendingRef.current = true;
+    requestAnimationFrame(() => {
+      rafPendingRef.current = false;
+      const idx = getDeepestAt(mousePosRef.current.x, mousePosRef.current.y);
+      setHovered(idx);
+    });
   }
 
   function handleClick(e: React.MouseEvent<HTMLCanvasElement>) {
@@ -349,7 +417,10 @@ export default function TreemapCanvas({ root, colorMode, selected, onSelect, sta
     const idx = getDeepestAt(e.clientX - r.left, e.clientY - r.top);
     if (idx === null) { onSelect(null); return; }
     const child = allRectsRef.current[idx].child;
-    onSelect(child);
+    // Convert TreeChild to FolderChild for the parent's onSelect
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { kind: _k, ...rest } = child;
+    onSelect(child.kind === "folder" ? { kind: "folder", ...rest } as FolderChild : { kind: "file", ...rest } as FolderChild);
     if (child.kind === "folder") {
       // Single click: toggle inline expansion
       setExpandedPaths(prev => {
@@ -368,8 +439,11 @@ export default function TreemapCanvas({ root, colorMode, selected, onSelect, sta
     const child = allRectsRef.current[idx].child;
     if (child.kind === "folder" && child.children.length > 0) {
       onStackChange([...stack, child]);
-      onSelect(child);
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { kind: _k, ...rest } = child;
+      onSelect({ kind: "folder", ...rest } as FolderChild);
       setHovered(null);
+      setFileLeaves([]);
     }
   }
 
@@ -451,7 +525,11 @@ export default function TreemapCanvas({ root, colorMode, selected, onSelect, sta
                   icon: "subdirectory_arrow_right",
                   onClick: () => {
                     const child = contextMenu.child;
-                    if (child.kind === "folder") { onStackChange([...stack, child]); onSelect(child); setHovered(null); }
+                    if (child.kind === "folder") {
+                      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                      const { kind: _k, ...rest } = child;
+                      onStackChange([...stack, child]); onSelect({ kind: "folder", ...rest } as FolderChild); setHovered(null); setFileLeaves([]);
+                    }
                   },
                 }]
               : []),

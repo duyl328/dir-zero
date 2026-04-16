@@ -40,27 +40,36 @@ cargo clippy   # Lint
 
 ### Backend (Rust + Tauri)
 
-- `src-tauri/src/lib.rs` — all Rust logic: `scan_folder` command, recursive directory traversal, progress event emission, type definitions mirroring the frontend types
+- `src-tauri/src/lib.rs` — all Rust logic: five Tauri commands, recursive directory traversal, progress event emission, type definitions mirroring the frontend types
+  - `scan_folder(roots, excludeRules)` — scans dirs, stores all `FileEntry` in `AppState`, returns `SlimScanResult`; emits `"scan-progress"` events every 200 items
+  - `get_files_chunk(offset, limit)` — paginated access to the flat `FileEntry` list stored in `AppState` after scan
+  - `get_folder_files(path)` — returns all `FileEntry` whose parent dir equals `path`; used by `TreemapCanvas` for lazy file-leaf loading
+  - `find_duplicates()` — 4-phase: size grouping → quick hash (64 KB) → full BLAKE3 hash → clustering; emits `"dup-progress"` events; operates on `AppState.files`
+  - `move_to_trash(paths)` — batch delete to recycle bin
 - `src-tauri/src/main.rs` — entry point
 - Tauri plugins: `tauri-plugin-dialog`, `tauri-plugin-opener` — must be registered in **both** `lib.rs` (`.plugin(...)`) **and** `src-tauri/capabilities/default.json` (permissions array)
-- Rust deps: `serde`, `serde_json`, `walkdir`, `rayon`
+- Rust deps: `serde`, `serde_json`, `walkdir`, `rayon`, `blake3`, `trash`
 
 ### Data flow
 
 1. User configures scan roots and exclude rules → stored in Zustand
 2. `ScanConfigModal` calls `invoke("scan_folder", { roots, excludeRules })`
 3. Rust emits `"scan-progress"` events every 200 items; frontend listens via `listen("scan-progress", ...)` and calls `setScanProgress`
-4. On completion, `scan_folder` returns `ScanResult`; frontend calls `setScanResult` which sets status to `"done"`
-5. `OverviewPage` reads from the store; `collectFiles(result.tree)` flattens the tree into a `FileEntry[]` for stats computations
+4. On completion, `scan_folder` returns `SlimScanResult` (folder tree + precomputed stats); frontend calls `setScanResult` which sets status to `"done"`
+5. After scan, the store lazy-loads the flat `FileEntry[]` in background chunks via `get_files_chunk(offset, limit)`, stored in `allFiles`
+6. `OverviewPage` reads `SlimScanResult.stats` for type bars and insight panels; `TreemapCanvas` calls `get_folder_files(path)` to load file leaves on demand
 
 ### Key types (`src/types/index.ts`)
 
 - `ScanSession` — lifecycle: `idle | configuring | scanning | done`
-- `FolderEntry` — recursive tree node; `children: FolderChild[]`
-- `FolderChild` — discriminated union: `{ kind: "folder" } & FolderEntry` or `{ kind: "file" } & FileEntry`. The `kind` tag comes from Rust's `#[serde(tag = "kind")]` on the `FolderChild` enum.
-- `FileEntry` — leaf node with `fileType: FileTypeCategory`, `ext`, `modifiedAt`, `createdAt` (unix ms)
+- `SlimFolderEntry` — IPC-safe folder tree node (folders only, no file leaves); sent over IPC (~5 MB for a full C: scan)
+- `SlimScanResult` — top-level scan result; contains `tree: SlimFolderEntry` and `stats: PrecomputedStats`
+- `PrecomputedStats` — precomputed on the Rust side: `typeStats`, `topFiles`, `oldFilesCount/Size`, `unknownExtStats`
+- `FileEntry` — leaf node with `fileType: FileTypeCategory`, `ext`, `sizeOnDisk`, `modifiedAt`, `createdAt` (unix ms), `isHidden`
+- `FileChunk` — paginated flat file list returned by `get_files_chunk`; lazy-loaded after scan completes
+- `FolderEntry` / `FolderChild` — still used in frontend analysis code; `FolderChild` is a discriminated union `{ kind: "folder" } & FolderEntry | { kind: "file" } & FileEntry`
 - `FileTypeCategory` — 15 categories: `image | video | audio | document | archive | installer | code | database | design | model | font | disk_image | system | cache | unknown`
-- `ExcludeRule` — glob/path patterns; builtin rules have IDs prefixed `b-`
+- `ExcludeRule` — glob/path/regex patterns; builtin rules have IDs prefixed `b-`
 
 ### File classification (`src-tauri/src/lib.rs — classify_ext`)
 
@@ -95,13 +104,13 @@ Shows a proportional colour bar + legend from real scan data. If `unknown` occup
 Three-tab layout: `DuplicatesTab`, `StructureTab`, `ResidueTab`.
 
 **Duplicates flow** mirrors the main scan flow:
-1. `FindProblemsPage` calls `invoke("find_duplicates", { paths })` with the scan roots
+1. `FindProblemsPage` calls `invoke("find_duplicates")` — no args; Rust operates on `AppState.files` already populated by `scan_folder`
 2. Rust emits `"dup-progress"` events; frontend listens and updates `duplicatesStatus` in the store
-3. On completion, raw results are enriched via a `fileMap` (path → `FileEntry`) built from the existing scan tree, then stored as `duplicatesResult`
+3. On completion, raw `RawDuplicateCluster[]` results are enriched via a `fileMap` (path → `FileEntry`) built from `allFiles`, then stored as `duplicatesResult: DuplicateCluster[]`
 
 **Structure & Residue analysis** run entirely in the frontend:
-- `src/components/problems/structureAnalysis.ts` — heuristic checks on the folder tree
-- `src/components/problems/residueAnalysis.ts` — matches against `BUILTIN_RESIDUE_RULES` (glob patterns for known leftover paths)
+- `src/analysis/structureAnalysis.ts` — heuristic checks on the folder tree
+- `src/analysis/residueAnalysis.ts` — matches against `BUILTIN_RESIDUE_RULES` (glob patterns for known leftover paths)
 
 The store holds `duplicatesResult` and `duplicatesStatus` alongside the main `ScanSession`.
 
@@ -113,4 +122,11 @@ The store holds `duplicatesResult` and `duplicatesStatus` alongside the main `Sc
 
 ### Styling
 
-Tailwind CSS with a custom Material Design 3 palette defined in `tailwind.config.js` — use the semantic tokens (`primary`, `secondary`, `tertiary`, `error`, `surface-*`) rather than raw Tailwind colours. TypeScript is configured with `strict: true`, `noUnusedLocals`, and `noUnusedParameters` — the type-check command (`npx tsc --noEmit`) must stay clean.
+Tailwind CSS with a custom Material Design 3 palette defined in `tailwind.config.js` — use the semantic tokens (`primary`, `secondary`, `tertiary`, `error`, `surface-*`) rather than raw Tailwind colours. Dark mode uses the `class` strategy with custom RGB channel vars (`--md-*`) for opacity support. TypeScript is configured with `strict: true`, `noUnusedLocals`, and `noUnusedParameters` — the type-check command (`npx tsc --noEmit`) must stay clean.
+
+### Internationalization
+
+- `src/i18n/zh.ts` and `src/i18n/en.ts` — all UI strings
+- Active locale stored in Zustand (`appStore.locale`), persisted to `localStorage`; defaults to `"zh"`
+- Use the `useT()` hook (`src/hooks/useT.ts`) to access the current locale's strings — do not read `localStorage` directly
+- When adding new UI text, add keys to both locale files

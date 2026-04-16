@@ -1,9 +1,18 @@
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
+
+// ── Managed state ─────────────────────────────────────────────────────────────
+
+struct AppState {
+    files: Mutex<Vec<FileEntry>>,
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -21,25 +30,68 @@ pub struct FileEntry {
     pub is_hidden: bool,
 }
 
+/// Slim folder tree — no FileEntry leaves, only folder structure.
+/// This is what gets sent over IPC (~5 MB for a full C: scan).
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct FolderEntry {
+pub struct SlimFolderEntry {
     pub path: String,
     pub name: String,
     pub size: u64,
     pub file_count: u64,
     pub folder_count: u64,
-    pub children: Vec<FolderChild>,
+    pub children: Vec<SlimFolderEntry>,
     pub depth: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum FolderChild {
-    #[serde(rename = "folder")]
-    Folder(FolderEntry),
-    #[serde(rename = "file")]
-    File(FileEntry),
+#[serde(rename_all = "camelCase")]
+pub struct TypeStat {
+    pub file_type: String,
+    pub size: u64,
+    pub count: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ResidueStatEntry {
+    pub rule_id: String,
+    pub total_size: u64,
+    pub count: u64,
+    pub files: Vec<FileEntry>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct PrecomputedStats {
+    pub type_stats: Vec<TypeStat>,
+    pub top_files: Vec<FileEntry>,
+    pub old_files_count: u64,
+    pub old_files_size: u64,
+    /// Top 8 extensions within the "unknown" category: [(ext, size)]
+    pub unknown_ext_stats: Vec<(String, u64)>,
+    /// Builtin residue rule matches — precomputed to avoid O(n×rules) in the frontend
+    pub residue_stats: Vec<ResidueStatEntry>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SlimScanResult {
+    pub total_size: u64,
+    pub file_count: u64,
+    pub folder_count: u64,
+    pub largest_file: Option<FileEntry>,
+    pub largest_folder: Option<SlimFolderEntry>,
+    pub issue_count: u32,
+    pub tree: SlimFolderEntry,
+    pub stats: PrecomputedStats,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct FileChunk {
+    pub files: Vec<FileEntry>,
+    pub total: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -50,18 +102,6 @@ pub struct ScanProgress {
     pub current_path: String,
     pub elapsed_ms: u64,
     pub mode: String,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ScanResult {
-    pub total_size: u64,
-    pub file_count: u64,
-    pub folder_count: u64,
-    pub largest_file: Option<FileEntry>,
-    pub largest_folder: Option<FolderEntry>,
-    pub issue_count: u32,
-    pub tree: FolderEntry,
 }
 
 #[derive(Deserialize, Debug)]
@@ -196,136 +236,339 @@ fn should_exclude(path: &Path, rules: &[ExcludeRule]) -> bool {
 // ── Recursive scan ───────────────────────────────────────────────────────────
 
 struct ScanState {
-    files_found: u64,
-    total_size: u64,
-    largest_file: Option<FileEntry>,
+    files_found: AtomicU64,
+    total_size: AtomicU64,
     start_ms: u64,
+    app: AppHandle,
 }
 
-fn scan_dir_recursive(
+/// Compute PrecomputedStats from the flat file list in a single pass.
+fn compute_residue(files: &[FileEntry]) -> Vec<ResidueStatEntry> {
+    type MatchFn = fn(&FileEntry) -> bool;
+    let rules: &[(&str, MatchFn)] = &[
+        ("ds_store",         |f| f.name == ".DS_Store"),
+        ("dot_underscore",   |f| f.name.starts_with("._")),
+        ("thumbs_db",        |f| f.name.to_lowercase() == "thumbs.db"),
+        ("desktop_ini",      |f| f.name.to_lowercase() == "desktop.ini"),
+        ("tmp",              |f| matches!(f.ext.to_lowercase().as_str(), "tmp" | "temp")),
+        ("download_partial", |f| matches!(f.ext.to_lowercase().as_str(), "crdownload" | "part" | "partial")),
+    ];
+    rules
+        .iter()
+        .filter_map(|(id, matcher)| {
+            let matched: Vec<FileEntry> = files.iter().filter(|f| matcher(f)).cloned().collect();
+            if matched.is_empty() {
+                return None;
+            }
+            let total_size: u64 = matched.iter().map(|f| f.size).sum();
+            let count = matched.len() as u64;
+            Some(ResidueStatEntry { rule_id: id.to_string(), total_size, count, files: matched })
+        })
+        .collect()
+}
+
+fn compute_stats(files: &[FileEntry]) -> PrecomputedStats {
+    let one_year_ago = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+        .saturating_sub(365 * 24 * 3600 * 1000);
+
+    let mut type_map: HashMap<&str, (u64, u64)> = HashMap::new(); // type → (size, count)
+    let mut unknown_ext_map: HashMap<String, u64> = HashMap::new();
+    let mut old_files_count = 0u64;
+    let mut old_files_size = 0u64;
+
+    for f in files {
+        let e = type_map.entry(f.file_type.as_str()).or_insert((0, 0));
+        e.0 += f.size;
+        e.1 += 1;
+        if f.file_type == "unknown" {
+            *unknown_ext_map.entry(f.ext.clone()).or_insert(0) += f.size;
+        }
+        if f.modified_at < one_year_ago {
+            old_files_count += 1;
+            old_files_size += f.size;
+        }
+    }
+
+    let mut type_stats: Vec<TypeStat> = type_map
+        .into_iter()
+        .map(|(ft, (size, count))| TypeStat { file_type: ft.to_string(), size, count })
+        .collect();
+    type_stats.sort_by(|a, b| b.size.cmp(&a.size));
+
+    let mut unknown_ext_stats: Vec<(String, u64)> = unknown_ext_map.into_iter().collect();
+    unknown_ext_stats.sort_by(|a, b| b.1.cmp(&a.1));
+    unknown_ext_stats.truncate(8);
+
+    let mut top_files: Vec<FileEntry> = files
+        .iter()
+        .filter(|f| f.size > 0)
+        .cloned()
+        .collect();
+    top_files.sort_by(|a, b| b.size.cmp(&a.size));
+    top_files.truncate(20);
+
+    let residue_stats = compute_residue(files);
+
+    PrecomputedStats { type_stats, top_files, old_files_count, old_files_size, unknown_ext_stats, residue_stats }
+}
+
+/// Only parallelize shallow levels; deep directories fall back to sequential
+/// to avoid spawning hundreds of thousands of rayon tasks (e.g. WinSxS).
+const PARALLEL_DEPTH_LIMIT: u32 = 3;
+
+/// Returns true if the entry is a reparse point (junction, symlink) on Windows,
+/// or a symlink on other platforms. These must be skipped to avoid cycles.
+fn is_reparse_point(entry: &std::fs::DirEntry) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        entry
+            .metadata()
+            .map(|m| m.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+            .unwrap_or(false)
+    }
+    #[cfg(not(windows))]
+    {
+        entry.file_type().map(|ft| ft.is_symlink()).unwrap_or(false)
+    }
+}
+
+/// Returns (SlimFolderEntry, flat Vec<FileEntry> collected from this subtree).
+fn scan_dir_parallel(
     dir: &Path,
     depth: u32,
     rules: &[ExcludeRule],
-    state: &mut ScanState,
-    app: &AppHandle,
-) -> FolderEntry {
+    state: &Arc<ScanState>,
+) -> (SlimFolderEntry, Vec<FileEntry>) {
+    let t0 = std::time::Instant::now();
+    let dir_str = dir.to_string_lossy().to_string();
+
+    if depth <= 1 {
+        eprintln!("[scan] → depth={depth}  {dir_str}");
+    }
+
     let name = dir
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| dir.to_string_lossy().to_string());
 
-    let mut folder = FolderEntry {
-        path: dir.to_string_lossy().to_string(),
-        name,
-        size: 0,
-        file_count: 0,
-        folder_count: 0,
-        children: Vec::new(),
-        depth,
-    };
-
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
-        Err(_) => return folder,
+        Err(e) => {
+            if depth <= 1 {
+                eprintln!("[scan] ✗ read_dir failed ({e})  {dir_str}");
+            }
+            return (SlimFolderEntry {
+                path: dir_str,
+                name,
+                size: 0,
+                file_count: 0,
+                folder_count: 0,
+                children: Vec::new(),
+                depth,
+            }, vec![]);
+        }
     };
 
-    let mut sub_entries: Vec<std::fs::DirEntry> = entries.flatten().collect();
-    sub_entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    let mut file_entries: Vec<std::fs::DirEntry> = Vec::new();
+    let mut dir_entries: Vec<std::fs::DirEntry> = Vec::new();
 
-    for entry in sub_entries {
+    for entry in entries.flatten() {
         let path = entry.path();
         if should_exclude(&path, rules) {
             continue;
         }
-
+        if is_reparse_point(&entry) {
+            continue;
+        }
         let ft = match entry.file_type() {
             Ok(t) => t,
             Err(_) => continue,
         };
-
         if ft.is_dir() {
-            state.files_found += 1;
-            if state.files_found % 200 == 0 {
-                let elapsed = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map(|d| d.as_millis() as u64)
-                    .unwrap_or(0)
-                    .saturating_sub(state.start_ms);
-                let _ = app.emit(
-                    "scan-progress",
-                    ScanProgress {
-                        files_found: state.files_found,
-                        total_size: state.total_size,
-                        current_path: path.to_string_lossy().to_string(),
-                        elapsed_ms: elapsed,
-                        mode: "compat".to_string(),
-                    },
-                );
-            }
-
-            let sub = scan_dir_recursive(&path, depth + 1, rules, state, app);
-            folder.size += sub.size;
-            folder.file_count += sub.file_count;
-            folder.folder_count += 1 + sub.folder_count;
-            folder.children.push(FolderChild::Folder(sub));
+            dir_entries.push(entry);
         } else if ft.is_file() {
-            let meta = match entry.metadata() {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-            let size = meta.len();
-            let modified_at = meta.modified().map(unix_ms).unwrap_or(0);
-            let created_at = meta.created().map(unix_ms).unwrap_or(0);
-            let name = path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-            let ext = path
-                .extension()
-                .map(|e| e.to_string_lossy().to_string())
-                .unwrap_or_default();
-            let file_type = classify_ext(&ext).to_string();
-            let is_hidden = is_hidden_name(&name);
-
-            let file = FileEntry {
-                path: path.to_string_lossy().to_string(),
-                size,
-                size_on_disk: size,
-                modified_at,
-                created_at,
-                file_type,
-                is_hidden,
-                name,
-                ext,
-            };
-
-            if state.largest_file.as_ref().map(|f| size > f.size).unwrap_or(true) {
-                state.largest_file = Some(file.clone());
-            }
-
-            folder.size += size;
-            folder.file_count += 1;
-            state.files_found += 1;
-            state.total_size += size;
-            folder.children.push(FolderChild::File(file));
+            file_entries.push(entry);
         }
     }
 
-    // Sort children by size descending for treemap
-    folder.children.sort_by(|a, b| {
-        let sa = match a {
-            FolderChild::Folder(f) => f.size,
-            FolderChild::File(f) => f.size,
-        };
-        let sb = match b {
-            FolderChild::Folder(f) => f.size,
-            FolderChild::File(f) => f.size,
-        };
-        sb.cmp(&sa)
-    });
+    // Log if just listing the directory entries was slow
+    let list_elapsed = t0.elapsed();
+    if list_elapsed.as_secs() >= 2 {
+        eprintln!(
+            "[scan] SLOW list  {:.1}s  files={} dirs={}  {dir_str}",
+            list_elapsed.as_secs_f32(),
+            file_entries.len(),
+            dir_entries.len()
+        );
+    }
 
-    folder
+    file_entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    dir_entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+
+    // Process files sequentially (metadata-only, fast)
+    let mut local_files: Vec<FileEntry> = Vec::new();
+    let mut folder_size: u64 = 0;
+    let mut folder_file_count: u64 = 0;
+
+    for entry in &file_entries {
+        let path = entry.path();
+        let meta = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        let size = meta.len();
+        let modified_at = meta.modified().map(unix_ms).unwrap_or(0);
+        let created_at = meta.created().map(unix_ms).unwrap_or(0);
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let ext = path
+            .extension()
+            .map(|e| e.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let file_type = classify_ext(&ext).to_string();
+        let is_hidden = is_hidden_name(&name);
+
+        let file = FileEntry {
+            path: path.to_string_lossy().to_string(),
+            size,
+            size_on_disk: size,
+            modified_at,
+            created_at,
+            file_type,
+            is_hidden,
+            name,
+            ext,
+        };
+
+        let count = state.files_found.fetch_add(1, Ordering::Relaxed) + 1;
+        state.total_size.fetch_add(size, Ordering::Relaxed);
+
+        if count % 200 == 0 {
+            let elapsed = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0)
+                .saturating_sub(state.start_ms);
+            let _ = state.app.emit(
+                "scan-progress",
+                ScanProgress {
+                    files_found: count,
+                    total_size: state.total_size.load(Ordering::Relaxed),
+                    current_path: path.to_string_lossy().to_string(),
+                    elapsed_ms: elapsed,
+                    mode: "compat".to_string(),
+                },
+            );
+        }
+
+        folder_size += size;
+        folder_file_count += 1;
+        local_files.push(file);
+    }
+
+    // Process subdirs: parallel for shallow levels, sequential for deep ones
+    let sub_results: Vec<(SlimFolderEntry, Vec<FileEntry>)> = if depth < PARALLEL_DEPTH_LIMIT {
+        dir_entries
+            .par_iter()
+            .map(|entry| {
+                let count = state.files_found.fetch_add(1, Ordering::Relaxed) + 1;
+                if count % 200 == 0 {
+                    let elapsed = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0)
+                        .saturating_sub(state.start_ms);
+                    let _ = state.app.emit(
+                        "scan-progress",
+                        ScanProgress {
+                            files_found: count,
+                            total_size: state.total_size.load(Ordering::Relaxed),
+                            current_path: entry.path().to_string_lossy().to_string(),
+                            elapsed_ms: elapsed,
+                            mode: "compat".to_string(),
+                        },
+                    );
+                }
+                scan_dir_parallel(&entry.path(), depth + 1, rules, state)
+            })
+            .collect()
+    } else {
+        dir_entries
+            .iter()
+            .map(|entry| {
+                let count = state.files_found.fetch_add(1, Ordering::Relaxed) + 1;
+                if count % 200 == 0 {
+                    let elapsed = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0)
+                        .saturating_sub(state.start_ms);
+                    let _ = state.app.emit(
+                        "scan-progress",
+                        ScanProgress {
+                            files_found: count,
+                            total_size: state.total_size.load(Ordering::Relaxed),
+                            current_path: entry.path().to_string_lossy().to_string(),
+                            elapsed_ms: elapsed,
+                            mode: "compat".to_string(),
+                        },
+                    );
+                }
+                scan_dir_parallel(&entry.path(), depth + 1, rules, state)
+            })
+            .collect()
+    };
+
+    let mut folder_folder_count: u64 = 0;
+    let mut slim_children: Vec<SlimFolderEntry> = Vec::new();
+
+    for (sub_slim, sub_files) in sub_results {
+        folder_size += sub_slim.size;
+        folder_file_count += sub_slim.file_count;
+        folder_folder_count += 1 + sub_slim.folder_count;
+        local_files.extend(sub_files);
+        slim_children.push(sub_slim);
+    }
+
+    // Sort slim children by size descending for treemap
+    slim_children.sort_by(|a, b| b.size.cmp(&a.size));
+
+    let total_elapsed = t0.elapsed();
+    if depth <= 1 {
+        eprintln!(
+            "[scan] ✓ depth={depth}  {:.1}s  files={} dirs={}  size={:.0}MB  {dir_str}",
+            total_elapsed.as_secs_f32(),
+            folder_file_count,
+            folder_folder_count,
+            folder_size as f64 / 1_048_576.0,
+        );
+    } else if total_elapsed.as_secs() >= 3 {
+        eprintln!(
+            "[scan] SLOW depth={depth}  {:.1}s  files={} dirs={}  {dir_str}",
+            total_elapsed.as_secs_f32(),
+            folder_file_count,
+            folder_folder_count,
+        );
+    }
+
+    (SlimFolderEntry {
+        path: dir.to_string_lossy().to_string(),
+        name,
+        size: folder_size,
+        file_count: folder_file_count,
+        folder_count: folder_folder_count,
+        children: slim_children,
+        depth,
+    }, local_files)
 }
+
 
 // ── Tauri commands ───────────────────────────────────────────────────────────
 
@@ -363,76 +606,138 @@ fn full_hash(path: &str) -> Option<String> {
 #[tauri::command]
 async fn scan_folder(
     app: AppHandle,
+    app_state: tauri::State<'_, AppState>,
     roots: Vec<String>,
     exclude_rules: Vec<ExcludeRule>,
-) -> Result<ScanResult, String> {
+) -> Result<SlimScanResult, String> {
     let start_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
 
-    let mut state = ScanState {
-        files_found: 0,
-        total_size: 0,
-        largest_file: None,
+    eprintln!("[scan] start  roots={:?}", roots);
+
+    // Clear previous scan files
+    app_state.files.lock().unwrap().clear();
+
+    let scan_state = Arc::new(ScanState {
+        files_found: AtomicU64::new(0),
+        total_size: AtomicU64::new(0),
         start_ms,
-    };
+        app: app.clone(),
+    });
 
-    let tree = if roots.len() == 1 {
-        let root_path = Path::new(&roots[0]);
-        scan_dir_recursive(root_path, 0, &exclude_rules, &mut state, &app)
-    } else {
-        let mut virtual_root = FolderEntry {
-            path: roots.join(", "),
-            name: "Selected Folders".to_string(),
-            size: 0,
-            file_count: 0,
-            folder_count: 0,
-            children: Vec::new(),
-            depth: 0,
-        };
-        for root in &roots {
-            let root_path = Path::new(root);
-            let sub = scan_dir_recursive(root_path, 1, &exclude_rules, &mut state, &app);
-            virtual_root.size += sub.size;
-            virtual_root.file_count += sub.file_count;
-            virtual_root.folder_count += 1 + sub.folder_count;
-            virtual_root.children.push(FolderChild::Folder(sub));
-        }
-        virtual_root
-    };
-
-    let largest_folder = tree
-        .children
-        .iter()
-        .filter_map(|c| {
-            if let FolderChild::Folder(f) = c {
-                Some(f.clone())
-            } else {
-                None
+    let scan_state_clone = Arc::clone(&scan_state);
+    let (slim_tree, all_files) = tauri::async_runtime::spawn_blocking(move || {
+        if roots.len() == 1 {
+            let root_path = std::path::PathBuf::from(&roots[0]);
+            scan_dir_parallel(&root_path, 0, &exclude_rules, &scan_state_clone)
+        } else {
+            let mut virtual_slim = SlimFolderEntry {
+                path: roots.join(", "),
+                name: "Selected Folders".to_string(),
+                size: 0,
+                file_count: 0,
+                folder_count: 0,
+                children: Vec::new(),
+                depth: 0,
+            };
+            let mut all: Vec<FileEntry> = Vec::new();
+            for root in &roots {
+                let root_path = std::path::PathBuf::from(root);
+                let (sub_slim, sub_files) =
+                    scan_dir_parallel(&root_path, 1, &exclude_rules, &scan_state_clone);
+                virtual_slim.size += sub_slim.size;
+                virtual_slim.file_count += sub_slim.file_count;
+                virtual_slim.folder_count += 1 + sub_slim.folder_count;
+                virtual_slim.children.push(sub_slim);
+                all.extend(sub_files);
             }
-        })
-        .max_by_key(|f| f.size);
+            (virtual_slim, all)
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?;
 
-    Ok(ScanResult {
-        total_size: state.total_size,
-        file_count: state.files_found,
-        folder_count: tree.folder_count,
-        largest_file: state.largest_file,
+    let files_found = scan_state.files_found.load(Ordering::Relaxed);
+    let total_size = scan_state.total_size.load(Ordering::Relaxed);
+    eprintln!(
+        "[scan] tree built  files={}  size={:.1}GB — computing stats...",
+        files_found,
+        total_size as f64 / 1_073_741_824.0
+    );
+
+    let stats = compute_stats(&all_files);
+    let largest_file = stats.top_files.first().cloned();
+    let largest_folder = slim_tree.children.iter().max_by_key(|f| f.size).cloned();
+
+    // Store flat file list in managed state for on-demand access
+    *app_state.files.lock().unwrap() = all_files;
+    eprintln!("[scan] done — returning slim result");
+
+    Ok(SlimScanResult {
+        total_size,
+        file_count: files_found,
+        folder_count: slim_tree.folder_count,
+        largest_file,
         largest_folder,
         issue_count: 0,
-        tree,
+        tree: slim_tree,
+        stats,
     })
+}
+
+/// Returns a paginated slice of the flat file list stored in managed state.
+#[tauri::command]
+async fn get_files_chunk(
+    app_state: tauri::State<'_, AppState>,
+    offset: u64,
+    limit: u64,
+) -> Result<FileChunk, String> {
+    let files = app_state.files.lock().unwrap();
+    let total = files.len() as u64;
+    let start = (offset as usize).min(files.len());
+    let end = ((offset + limit) as usize).min(files.len());
+    Ok(FileChunk { files: files[start..end].to_vec(), total })
+}
+
+/// Returns all FileEntry objects whose parent directory equals `path`.
+/// Used by TreemapCanvas to lazy-load file leaves for the current folder.
+#[tauri::command]
+async fn get_folder_files(
+    app_state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<Vec<FileEntry>, String> {
+    let files = app_state.files.lock().unwrap();
+    let result: Vec<FileEntry> = files
+        .iter()
+        .filter(|f| {
+            std::path::Path::new(&f.path)
+                .parent()
+                .map(|p| p.to_string_lossy() == path.as_str())
+                .unwrap_or(false)
+        })
+        .cloned()
+        .collect();
+    Ok(result)
 }
 
 #[tauri::command]
 async fn find_duplicates(
     app: AppHandle,
-    paths: Vec<String>,
+    app_state: tauri::State<'_, AppState>,
 ) -> Result<Vec<DuplicateCluster>, String> {
     use rayon::prelude::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+
+    let paths: Vec<String> = app_state
+        .files
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|f| f.path.clone())
+        .collect();
 
     // ── Phase 1: group by size (metadata only, very fast) ────────────────────
     let mut size_groups: HashMap<u64, Vec<String>> = HashMap::new();
@@ -559,9 +864,16 @@ async fn move_to_trash(paths: Vec<String>) -> Result<Vec<String>, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(AppState { files: Mutex::new(vec![]) })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![scan_folder, find_duplicates, move_to_trash])
+        .invoke_handler(tauri::generate_handler![
+            scan_folder,
+            get_files_chunk,
+            get_folder_files,
+            find_duplicates,
+            move_to_trash
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

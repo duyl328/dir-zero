@@ -6,7 +6,7 @@ import InsightPanel from "../components/overview/InsightPanel";
 import SearchBar, { EMPTY_FILTERS, isFiltersActive, compileKeyword } from "../components/overview/SearchBar";
 import SearchResultList from "../components/overview/SearchResultList";
 import { useState, useEffect, useRef, useMemo } from "react";
-import type { FolderEntry, FolderChild, FileEntry } from "../types";
+import type { SlimFolderEntry, FolderChild, FileEntry } from "../types";
 import type { SearchFilters } from "../components/overview/SearchBar";
 
 function formatBytes(b: number) {
@@ -16,24 +16,13 @@ function formatBytes(b: number) {
 }
 
 // Find the path (stack) from root to the folder with the given path string
-function findPathToFolder(node: FolderEntry, targetPath: string): FolderEntry[] | null {
+function findPathToFolder(node: SlimFolderEntry, targetPath: string): SlimFolderEntry[] | null {
   if (node.path === targetPath) return [node];
   for (const child of node.children) {
-    if (child.kind === "folder") {
-      const sub = findPathToFolder(child, targetPath);
-      if (sub) return [node, ...sub];
-    }
+    const sub = findPathToFolder(child, targetPath);
+    if (sub) return [node, ...sub];
   }
   return null;
-}
-
-// Recursively collect all file entries from the tree
-function collectFiles(node: FolderEntry, out: FileEntry[] = []): FileEntry[] {
-  for (const child of node.children) {
-    if (child.kind === "file") out.push(child);
-    else collectFiles(child, out);
-  }
-  return out;
 }
 
 const MS_30D = 30 * 24 * 60 * 60 * 1000;
@@ -66,8 +55,34 @@ function filterFiles(files: FileEntry[], f: SearchFilters): FileEntry[] {
 
 type ColorMode = "type" | "age";
 
+const TYPE_META: Record<string, { label: string; color: string }> = {
+  video:      { label: "Videos",     color: "#06b6d4" },
+  installer:  { label: "Apps",       color: "#6366f1" },
+  document:   { label: "Docs",       color: "#94a3b8" },
+  image:      { label: "Images",     color: "#f59e0b" },
+  code:       { label: "Code",       color: "#10b981" },
+  archive:    { label: "Archives",   color: "#8b5cf6" },
+  audio:      { label: "Audio",      color: "#ec4899" },
+  database:   { label: "Database",   color: "#f97316" },
+  design:     { label: "Design",     color: "#e879f9" },
+  model:      { label: "3D/Game",    color: "#34d399" },
+  font:       { label: "Fonts",      color: "#a78bfa" },
+  disk_image: { label: "Disk Img",   color: "#fb7185" },
+  system:     { label: "System",     color: "#64748b" },
+  cache:      { label: "Cache",      color: "#6b7280" },
+  unknown:    { label: "Unknown",    color: "#a9b4b9" },
+};
+
 export default function OverviewPage() {
   const { session, setScanStatus } = useAppStore();
+  // Keep allFiles in a ref — don't subscribe reactively to avoid re-renders during chunk loading
+  const allFilesRef = useRef<import("../types").FileEntry[] | null>(null);
+  useEffect(() => {
+    // Sync once on mount, then subscribe to future changes
+    allFilesRef.current = useAppStore.getState().allFiles;
+    return useAppStore.subscribe((s) => { allFilesRef.current = s.allFiles; });
+  }, []);
+  const filesLoading = useAppStore((s) => s.filesLoading);
   const result = session.result;
   const [colorMode, setColorMode] = useState<ColorMode>("type");
   const [selected, setSelected] = useState<FolderChild | null>(null);
@@ -90,7 +105,7 @@ export default function OverviewPage() {
   }, []);
 
   // Treemap drill-down stack — lifted here so tree and treemap stay in sync
-  const [treemapStack, setTreemapStack] = useState<FolderEntry[]>(result ? [result.tree] : []);
+  const [treemapStack, setTreemapStack] = useState<SlimFolderEntry[]>(result ? [result.tree] : []);
 
   // Reset when scan result changes
   useEffect(() => {
@@ -100,15 +115,17 @@ export default function OverviewPage() {
     }
   }, [result]);
 
-  // Compute real file stats from the tree
-  const allFiles = useMemo(() => result ? collectFiles(result.tree) : [], [result]);
-
-  // Search / filter
+  // Search / filter — reads allFiles from ref (not subscribed) to avoid re-renders during loading
   const searchActive = isFiltersActive(filters);
   const matchedFiles = useMemo(
-    () => searchActive ? filterFiles(allFiles, filters) : [],
+    () => {
+      if (!searchActive) return [];
+      const files = allFilesRef.current;
+      return files ? filterFiles(files, filters) : [];
+    },
+    // filesLoading included so results refresh when loading completes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allFiles, filters]
+    [filters, searchActive, filesLoading]
   );
   const matchedPaths = useMemo(
     () => searchActive ? new Set(matchedFiles.map((f) => f.path)) : undefined,
@@ -126,61 +143,37 @@ export default function OverviewPage() {
     if (path) setTreemapStack(path);
   }
 
+  // TypeBar stats from precomputed data (no collectFiles needed)
   const typeStats = useMemo(() => {
-    if (!allFiles.length) return [];
-    const totals: Record<string, number> = {};
-    let total = 0;
-    for (const f of allFiles) {
-      totals[f.fileType] = (totals[f.fileType] ?? 0) + f.size;
-      total += f.size;
-    }
-    const TYPE_META: Record<string, { label: string; color: string }> = {
-      video:      { label: "Videos",     color: "#06b6d4" },
-      installer:  { label: "Apps",       color: "#6366f1" },
-      document:   { label: "Docs",       color: "#94a3b8" },
-      image:      { label: "Images",     color: "#f59e0b" },
-      code:       { label: "Code",       color: "#10b981" },
-      archive:    { label: "Archives",   color: "#8b5cf6" },
-      audio:      { label: "Audio",      color: "#ec4899" },
-      database:   { label: "Database",   color: "#f97316" },
-      design:     { label: "Design",     color: "#e879f9" },
-      model:      { label: "3D/Game",    color: "#34d399" },
-      font:       { label: "Fonts",      color: "#a78bfa" },
-      disk_image: { label: "Disk Img",   color: "#fb7185" },
-      system:     { label: "System",     color: "#64748b" },
-      cache:      { label: "Cache",      color: "#6b7280" },
-      unknown:    { label: "Unknown",    color: "#a9b4b9" },
-    };
-    return Object.entries(totals)
-      .filter(([, sz]) => sz > 0)
-      .sort(([, a], [, b]) => b - a)
-      .map(([type, sz]) => ({
-        type,
-        label: TYPE_META[type]?.label ?? type,
-        color: TYPE_META[type]?.color ?? "#a9b4b9",
-        pct: total > 0 ? ((sz / total) * 100).toFixed(1) + "%" : "0%",
-        pctNum: total > 0 ? (sz / total) * 100 : 0,
-        size: sz,
+    if (!result) return [];
+    const total = result.totalSize;
+    return result.stats.typeStats
+      .filter((s) => s.size > 0)
+      .map((s) => ({
+        type: s.fileType,
+        label: TYPE_META[s.fileType]?.label ?? s.fileType,
+        color: TYPE_META[s.fileType]?.color ?? "#a9b4b9",
+        pct: total > 0 ? ((s.size / total) * 100).toFixed(1) + "%" : "0%",
+        pctNum: total > 0 ? (s.size / total) * 100 : 0,
+        size: s.size,
       }));
-  }, [allFiles]);
+  }, [result]);
 
-  // Per-extension breakdown for unknown files
+  // Unknown ext breakdown from precomputed data
   const unknownExtStats = useMemo(() => {
-    const extTotals: Record<string, number> = {};
-    let total = 0;
-    for (const f of allFiles) {
-      if (f.fileType !== "unknown") continue;
-      const ext = f.ext ? `.${f.ext.toLowerCase()}` : "(no ext)";
-      extTotals[ext] = (extTotals[ext] ?? 0) + f.size;
-      total += f.size;
-    }
-    return { total, exts: Object.entries(extTotals).sort(([, a], [, b]) => b - a).slice(0, 8) };
-  }, [allFiles]);
+    if (!result) return { total: 0, exts: [] as [string, number][] };
+    const unknownStat = result.stats.typeStats.find((s) => s.fileType === "unknown");
+    const total = unknownStat?.size ?? 0;
+    const exts = result.stats.unknownExtStats.map(([ext, sz]) => [
+      ext ? `.${ext.toLowerCase()}` : "(no ext)",
+      sz,
+    ] as [string, number]);
+    return { total, exts };
+  }, [result]);
 
   // Called when user clicks a node in the directory tree
   function handleTreeSelect(child: FolderChild) {
     setSelected(child);
-    // If it's a folder, navigate the treemap to show its contents
     if (child.kind === "folder" && result) {
       const path = findPathToFolder(result.tree, child.path);
       if (path) setTreemapStack(path);
@@ -294,11 +287,18 @@ export default function OverviewPage() {
         {/* Center: treemap or search results */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {searchActive ? (
-            <SearchResultList
-              files={matchedFiles}
-              onSelect={handleResultSelect}
-              selectedPath={selected?.path ?? null}
-            />
+            <>
+              {filesLoading && (
+                <div className="px-4 py-1.5 text-xs text-on-surface-variant/60 bg-surface-container-low border-b border-outline-variant/10 shrink-0">
+                  正在加载文件列表…
+                </div>
+              )}
+              <SearchResultList
+                files={matchedFiles}
+                onSelect={handleResultSelect}
+                selectedPath={selected?.path ?? null}
+              />
+            </>
           ) : (
             <>
               {/* Breadcrumb path */}
@@ -338,7 +338,12 @@ export default function OverviewPage() {
         {/* Right: detail + insight */}
         <div className="w-72 shrink-0 border-l border-outline-variant/10 flex flex-col overflow-hidden">
           <DetailPanel node={selected} />
-          <InsightPanel allFiles={allFiles} totalSize={result.totalSize} />
+          <InsightPanel
+            topFiles={result.stats.topFiles}
+            oldFilesCount={result.stats.oldFilesCount}
+            oldFilesSize={result.stats.oldFilesSize}
+            totalSize={result.totalSize}
+          />
         </div>
       </div>
     </div>
@@ -360,7 +365,6 @@ function StatCard({ icon, label, value }: { icon: string; label: string; value: 
 interface TypeBarStat { type: string; label: string; color: string; pct: string; pctNum: number; size: number }
 interface UnknownExtStats { total: number; exts: [string, number][] }
 
-// Unknown is "large" if it contributes more than this share
 const UNKNOWN_EXPAND_THRESHOLD = 15; // percent
 
 function TypeBar({ stats, unknownExts }: { stats: TypeBarStat[]; unknownExts: UnknownExtStats }) {

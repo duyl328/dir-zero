@@ -14,14 +14,6 @@ import type { FileEntry, RawDuplicateCluster, DuplicateCluster } from "../types"
 
 type Tab = "duplicates" | "structure" | "residue";
 
-function collectFiles(node: import("../types").FolderEntry, out: FileEntry[] = []): FileEntry[] {
-  for (const child of node.children) {
-    if (child.kind === "file") out.push(child);
-    else collectFiles(child, out);
-  }
-  return out;
-}
-
 function formatBytes(b: number) {
   if (b < 1e6) return `${(b / 1e3).toFixed(0)} KB`;
   if (b < 1e9) return `${(b / 1e6).toFixed(1)} MB`;
@@ -29,7 +21,7 @@ function formatBytes(b: number) {
 }
 
 export default function FindProblemsPage() {
-  const { session, duplicatesResult, duplicatesStatus, setDuplicatesResult, setDuplicatesStatus } = useAppStore();
+  const { session, duplicatesResult, duplicatesStatus, setDuplicatesResult, setDuplicatesStatus, allFiles } = useAppStore();
   const t = useT();
   const result = session.result;
   const [tab, setTab] = useState<Tab>("residue");
@@ -39,7 +31,6 @@ export default function FindProblemsPage() {
   const { rules: customRules, addRule, removeRule, toggleEnabled } = useCustomResidueRules();
   const cancelledRef = useRef(false);
   const { show: showToast, ToastContainer } = useToast();
-  // Track in-progress deletions per tab for the tab-button indicator
   const [activeDeletes, setActiveDeletes] = useState<Set<Tab>>(new Set());
 
   const markDeleteStart = useCallback((tabId: Tab) =>
@@ -54,7 +45,6 @@ export default function FindProblemsPage() {
     }
   }, [showToast, t]);
 
-  // Reset per-session state when a new scan starts
   const prevSessionId = useRef(session.id);
   useEffect(() => {
     if (session.id !== prevSessionId.current) {
@@ -65,30 +55,50 @@ export default function FindProblemsPage() {
     }
   }, [session.id]);
 
-  const allFiles = useMemo(
-    () => result ? collectFiles(result.tree).filter((f) => !deletedPaths.has(f.path)) : [],
-    [result, refreshKey, deletedPaths]
+  // Use lazy-loaded allFiles from store instead of collectFiles(result.tree)
+  const filteredFiles = useMemo(
+    () => (allFiles ?? []).filter((f) => !deletedPaths.has(f.path)),
+    [allFiles, refreshKey, deletedPaths]
   );
 
   const structureData = useMemo(
-    () => result ? analyzeStructure(result.tree) : null,
+    () => result ? analyzeStructure(result.tree as unknown as import("../types").FolderEntry) : null,
     [result, refreshKey]
   );
 
-  const residueGroups = useMemo(
-    () => analyzeResidue(allFiles, [
-      ...BUILTIN_RESIDUE_RULES,
-      ...customRules.filter((r) => r.enabled).map(storedRuleToRuleDef),
-    ]),
-    [allFiles, customRules]
-  );
+  const residueGroups = useMemo(() => {
+    // Builtin rules: merge Rust-precomputed file lists with static metadata
+    const builtinGroups: import("../analysis/residueAnalysis").ResidueGroup[] = [];
+    if (result) {
+      for (const entry of result.stats.residueStats) {
+        const ruleDef = BUILTIN_RESIDUE_RULES.find((r) => r.id === entry.ruleId);
+        if (!ruleDef) continue;
+        const files = entry.files.filter((f) => !deletedPaths.has(f.path));
+        if (files.length === 0) continue;
+        builtinGroups.push({
+          ruleId: entry.ruleId,
+          label: ruleDef.label,
+          desc: ruleDef.desc,
+          icon: ruleDef.icon,
+          files,
+          totalSize: files.reduce((s, f) => s + f.size, 0),
+          enabled: ruleDef.defaultEnabled,
+        });
+      }
+    }
+    // Custom rules: still run in frontend (user-defined, not known at scan time)
+    const activeCustomRules = customRules.filter((r) => r.enabled).map(storedRuleToRuleDef);
+    const customGroups = activeCustomRules.length > 0
+      ? analyzeResidue(filteredFiles, activeCustomRules)
+      : [];
+    return [...builtinGroups, ...customGroups];
+  }, [result, deletedPaths, filteredFiles, customRules]);
 
-  // Build path→FileEntry map for enriching duplicate clusters
   const fileMap = useMemo(() => {
     const m = new Map<string, FileEntry>();
-    for (const f of allFiles) m.set(f.path, f);
+    for (const f of filteredFiles) m.set(f.path, f);
     return m;
-  }, [allFiles]);
+  }, [filteredFiles]);
 
   async function startDuplicateScan() {
     if (!result) return;
@@ -101,8 +111,8 @@ export default function FindProblemsPage() {
     });
 
     try {
-      const paths = allFiles.map((f) => f.path);
-      const raw = await invoke<RawDuplicateCluster[]>("find_duplicates", { paths });
+      // Rust reads file paths from AppState — no need to pass paths
+      const raw = await invoke<RawDuplicateCluster[]>("find_duplicates");
 
       if (cancelledRef.current) {
         setDuplicatesStatus("idle");

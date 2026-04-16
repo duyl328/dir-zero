@@ -1,9 +1,10 @@
-import { useMemo } from "react";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { FileEntry } from "../../types";
 
 interface Props {
-  allFiles: FileEntry[];
+  topFiles: FileEntry[];
+  oldFilesCount: number;
+  oldFilesSize: number;
   totalSize: number;
 }
 
@@ -13,24 +14,13 @@ function formatBytes(b: number) {
   return `${(b / 1e9).toFixed(2)} GB`;
 }
 
-const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 const TOP_N = 8;
 
-export default function InsightPanel({ allFiles, totalSize }: Props) {
-  const topFiles = useMemo(
-    () => [...allFiles].sort((a, b) => b.size - a.size).slice(0, TOP_N),
-    [allFiles]
-  );
+export default function InsightPanel({ topFiles, oldFilesCount, oldFilesSize, totalSize }: Props) {
+  const displayFiles = topFiles.slice(0, TOP_N);
+  const oldPct = totalSize > 0 ? ((oldFilesSize / totalSize) * 100).toFixed(1) : "0";
 
-  const oldFilesInfo = useMemo(() => {
-    const cutoff = Date.now() - ONE_YEAR_MS;
-    const old = allFiles.filter((f) => f.modifiedAt < cutoff);
-    const size = old.reduce((s, f) => s + f.size, 0);
-    const pct = totalSize > 0 ? ((size / totalSize) * 100).toFixed(1) : "0";
-    return { count: old.length, size, pct };
-  }, [allFiles, totalSize]);
-
-  if (!allFiles.length) {
+  if (!displayFiles.length) {
     return (
       <div className="flex-1 flex items-center justify-center p-4 text-center">
         <p className="text-xs text-on-surface-variant/50">暂无数据</p>
@@ -46,7 +36,7 @@ export default function InsightPanel({ allFiles, totalSize }: Props) {
         <div className="min-w-0 flex-1">
           <p className="text-xs font-bold text-on-surface">超过一年未修改</p>
           <p className="text-[10px] text-on-surface-variant mt-0.5">
-            {oldFilesInfo.count.toLocaleString()} 个文件 · {formatBytes(oldFilesInfo.size)} · 占 {oldFilesInfo.pct}%
+            {oldFilesCount.toLocaleString()} 个文件 · {formatBytes(oldFilesSize)} · 占 {oldPct}%
           </p>
         </div>
       </div>
@@ -57,8 +47,8 @@ export default function InsightPanel({ allFiles, totalSize }: Props) {
           最大文件 Top {TOP_N}
         </p>
         <div className="space-y-0.5">
-          {topFiles.map((f, i) => {
-            const barW = totalSize > 0 ? (f.size / topFiles[0].size) * 100 : 0;
+          {displayFiles.map((f, i) => {
+            const barW = displayFiles[0].size > 0 ? (f.size / displayFiles[0].size) * 100 : 0;
             return (
               <button
                 key={f.path}
@@ -66,11 +56,9 @@ export default function InsightPanel({ allFiles, totalSize }: Props) {
                 title={f.path}
                 className="w-full group flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-surface-container-high transition-colors text-left"
               >
-                {/* rank */}
                 <span className="text-[10px] font-bold text-on-surface-variant/40 w-4 text-right shrink-0">
                   {i + 1}
                 </span>
-                {/* name + bar */}
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium text-on-surface truncate leading-tight">{f.name}</p>
                   <div className="mt-0.5 h-1 rounded-full bg-surface-container-highest overflow-hidden">
@@ -80,9 +68,7 @@ export default function InsightPanel({ allFiles, totalSize }: Props) {
                     />
                   </div>
                 </div>
-                {/* size */}
                 <span className="text-[10px] font-bold text-on-surface-variant shrink-0">{formatBytes(f.size)}</span>
-                {/* open icon */}
                 <span className="material-symbols-outlined text-[13px] text-on-surface-variant/30 group-hover:text-primary transition-colors shrink-0">
                   open_in_new
                 </span>

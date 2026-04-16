@@ -6,7 +6,7 @@ export interface ScanSession {
   roots: string[];
   status: ScanStatus;
   progress: ScanProgress | null;
-  result: ScanResult | null;
+  result: SlimScanResult | null;
   startedAt: number | null;
 }
 
@@ -18,15 +18,57 @@ export interface ScanProgress {
   mode: "mft" | "compat";
 }
 
-export interface ScanResult {
+// ── Slim tree (IPC-safe, folders only) ───────────────────────────────────────
+
+export interface SlimFolderEntry {
+  path: string;
+  name: string;
+  size: number;
+  fileCount: number;
+  folderCount: number;
+  children: SlimFolderEntry[];
+  depth: number;
+}
+
+export interface TypeStat {
+  fileType: FileTypeCategory;
+  size: number;
+  count: number;
+}
+
+export interface ResidueStatEntry {
+  ruleId: string;
+  totalSize: number;
+  count: number;
+  files: FileEntry[];
+}
+
+export interface PrecomputedStats {
+  typeStats: TypeStat[];
+  topFiles: FileEntry[];
+  oldFilesCount: number;
+  oldFilesSize: number;
+  unknownExtStats: [string, number][]; // [ext, size][]
+  residueStats: ResidueStatEntry[];
+}
+
+export interface SlimScanResult {
   totalSize: number;
   fileCount: number;
   folderCount: number;
   largestFile: FileEntry | null;
-  largestFolder: FolderEntry | null;
+  largestFolder: SlimFolderEntry | null;
   issueCount: number;
-  tree: FolderEntry;
+  tree: SlimFolderEntry;
+  stats: PrecomputedStats;
 }
+
+export interface FileChunk {
+  files: FileEntry[];
+  total: number;
+}
+
+// ── File / folder entries ─────────────────────────────────────────────────────
 
 export interface FileEntry {
   path: string;
@@ -70,15 +112,6 @@ export type FileTypeCategory =
   | "system"
   | "cache"
   | "unknown";
-
-export interface DuplicateCluster {
-  id: string;
-  hash: string;
-  fileSize: number;
-  files: FileEntry[];
-  reclaimable: number;
-  suggestedKeep: string; // path
-}
 
 export interface StructureIssue {
   type: "empty_folder" | "zero_byte" | "deep_nest" | "long_path" | "single_child_chain" | "dense_small" | "odd_name";

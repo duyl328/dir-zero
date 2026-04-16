@@ -66,13 +66,7 @@ function formatBytes(b: number) {
   return `${(b / 1e9).toFixed(2)} GB`;
 }
 
-function collectFiles(node: import("../types").FolderEntry, out: FileEntry[] = []): FileEntry[] {
-  for (const child of node.children) {
-    if (child.kind === "file") out.push(child);
-    else collectFiles(child, out);
-  }
-  return out;
-}
+// collectFiles removed — allFiles now comes from store (lazy-loaded)
 
 function topDirs(files: FileEntry[], n = 3): { dir: string; size: number }[] {
   const map = new Map<string, number>();
@@ -123,7 +117,7 @@ function buildAgeGroups(files: FileEntry[], ageBuckets: ReturnType<typeof getAge
 function ExtBreakdown({ files, color, noExtLabel }: { files: FileEntry[]; color: string; noExtLabel: string }) {
   const t = useT();
   const [showAll, setShowAll] = useState(false);
-  const rows = buildExtBreakdown(files, noExtLabel);
+  const rows = useMemo(() => buildExtBreakdown(files, noExtLabel), [files, noExtLabel]);
   const maxSize = rows[0]?.size ?? 1;
   const visible = showAll ? rows : rows.slice(0, 6);
   return (
@@ -191,8 +185,9 @@ function FileList({ files, selected, onToggle, limit = 8 }: { files: FileEntry[]
 
 // ── TypeCard ─────────────────────────────────────────────────────────────────
 
-function TypeCard({ group, totalSize, selected, onToggle, onToggleAll }: {
+function TypeCard({ group, totalSize, selected, selState, onToggle, onToggleAll }: {
   group: TypeGroup; totalSize: number; selected: Set<string>;
+  selState: { allSel: boolean; anySel: boolean; paths: string[] };
   onToggle: (p: string) => void; onToggleAll: (ps: string[]) => void;
 }) {
   const t = useT();
@@ -200,10 +195,8 @@ function TypeCard({ group, totalSize, selected, onToggle, onToggleAll }: {
   const meta = TYPE_META[group.category];
   const label = getTypeLabel(group.category, t);
   const pct = totalSize > 0 ? (group.totalSize / totalSize) * 100 : 0;
-  const paths = group.files.map((f) => f.path);
-  const allSel = paths.length > 0 && paths.every((p) => selected.has(p));
-  const anySel = paths.some((p) => selected.has(p));
-  const dirs = topDirs(group.files);
+  const { allSel, anySel, paths } = selState;
+  const dirs = useMemo(() => topDirs(group.files), [group.files]);
 
   return (
     <div className={["bg-surface-container-lowest rounded-xl border overflow-hidden transition-all", anySel ? "border-primary/40 bg-primary/5" : "border-outline-variant/10"].join(" ")}>
@@ -327,6 +320,7 @@ function AgeCard({ group, totalSize, selected, onToggle, onToggleAll }: {
 export default function FileTypesPage() {
   const t = useT();
   const result = useAppStore((s) => s.session.result);
+  const storeAllFiles = useAppStore((s) => s.allFiles);
   const [activeTab, setActiveTab] = useState<PageTab>("types");
   const [sortBy, setSortBy] = useState<SortKey>("size");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -337,8 +331,8 @@ export default function FileTypesPage() {
   const ageBuckets = useMemo(() => getAgeBuckets(t), [t]);
 
   const allFiles = useMemo(
-    () => result ? collectFiles(result.tree).filter((f) => !deletedPaths.has(f.path)) : [],
-    [result, deletedPaths]
+    () => (storeAllFiles ?? []).filter((f) => !deletedPaths.has(f.path)),
+    [storeAllFiles, deletedPaths]
   );
   const totalSize = useMemo(() => allFiles.reduce((s, f) => s + f.size, 0), [allFiles]);
 
@@ -350,6 +344,18 @@ export default function FileTypesPage() {
   }, [allFiles, sortBy, t]);
 
   const ageGroups = useMemo(() => buildAgeGroups(allFiles, ageBuckets), [allFiles, ageBuckets]);
+
+  // Pre-compute selection state for all type groups — avoids O(n) every/some inside each TypeCard on every render
+  const groupSelState = useMemo(() => {
+    const m = new Map<string, { allSel: boolean; anySel: boolean; paths: string[] }>();
+    for (const g of typeGroups) {
+      const paths = g.files.map((f) => f.path);
+      const allSel = paths.length > 0 && paths.every((p) => selected.has(p));
+      const anySel = paths.some((p) => selected.has(p));
+      m.set(g.category, { allSel, anySel, paths });
+    }
+    return m;
+  }, [typeGroups, selected]);
 
   const toggleItem = useCallback((path: string) => {
     setSelected((prev) => { const next = new Set(prev); next.has(path) ? next.delete(path) : next.add(path); return next; });
@@ -434,7 +440,7 @@ export default function FileTypesPage() {
         {activeTab === "types" ? (
           typeGroups.length === 0
             ? <p className="text-sm text-on-surface-variant/60 text-center py-12">{t.fileTypes.noData}</p>
-            : typeGroups.map((g) => <TypeCard key={g.category} group={g} totalSize={totalSize} selected={selected} onToggle={toggleItem} onToggleAll={toggleAll} />)
+            : typeGroups.map((g) => <TypeCard key={g.category} group={g} totalSize={totalSize} selected={selected} selState={groupSelState.get(g.category) ?? { allSel: false, anySel: false, paths: [] }} onToggle={toggleItem} onToggleAll={toggleAll} />)
         ) : (
           ageGroups.length === 0
             ? <p className="text-sm text-on-surface-variant/60 text-center py-12">{t.fileTypes.noData}</p>
