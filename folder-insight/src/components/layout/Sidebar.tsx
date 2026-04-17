@@ -8,9 +8,9 @@ export default function Sidebar() {
   const t = useT();
 
   const navItems = [
-    { to: "/overview", icon: "visibility", label: t.sidebar.overview },
-    { to: "/problems", icon: "report_problem", label: t.sidebar.problems },
-    { to: "/types", icon: "category", label: t.sidebar.fileTypes },
+    { to: "/overview", icon: "visibility", label: t.sidebar.overview, id: "tour-overview-nav" },
+    { to: "/problems", icon: "report_problem", label: t.sidebar.problems, id: "tour-problems-nav" },
+    { to: "/types", icon: "category", label: t.sidebar.fileTypes, id: "tour-types-nav" },
   ];
 
   function handleNewScan() {
@@ -21,7 +21,7 @@ export default function Sidebar() {
   return (
     <aside className="h-screen w-60 fixed left-0 top-0 bg-surface-container-low flex flex-col py-6 px-4 z-50 select-none border-r border-outline-variant/20">
       {/* Logo */}
-      <div className="mb-8 px-2 flex items-center gap-3">
+      <div id="tour-logo" className="mb-8 px-2 flex items-center gap-3">
         <div className="w-8 h-8 rounded-md bg-primary flex items-center justify-center shrink-0">
           <span className="material-symbols-outlined text-on-primary text-[18px]">folder_managed</span>
         </div>
@@ -33,11 +33,12 @@ export default function Sidebar() {
 
       {/* Nav */}
       <nav className="flex-1 space-y-0.5">
-        {navItems.map(({ to, icon, label }) => {
+        {navItems.map(({ to, icon, label, id }) => {
           const active = location.pathname.startsWith(to);
           return (
             <NavLink
               key={to}
+              id={id}
               to={to}
               className={[
                 "flex items-center gap-3 px-3 py-2.5 rounded-lg font-headline text-sm tracking-tight transition-colors duration-150",
@@ -60,6 +61,7 @@ export default function Sidebar() {
 
       {/* New Scan CTA */}
       <button
+        id="tour-new-scan"
         onClick={handleNewScan}
         className="mb-6 mx-2 py-2.5 px-4 rounded-xl cta-gradient text-on-primary font-headline font-bold text-sm shadow-md hover:opacity-90 transition-opacity flex items-center justify-center gap-2 active:scale-95 duration-150"
       >

@@ -1,4 +1,5 @@
 import { useLocation } from "react-router-dom";
+import { useState, useEffect } from "react";
 import Sidebar from "./Sidebar";
 import ScanConfigModal from "../scan/ScanConfigModal";
 import { useAppStore } from "../../store/appStore";
@@ -6,10 +7,18 @@ import OverviewPage from "../../pages/OverviewPage";
 import FindProblemsPage from "../../pages/FindProblemsPage";
 import FileTypesPage from "../../pages/FileTypesPage";
 import SettingsPage from "../../pages/SettingsPage";
+import OnboardingTour, { shouldShowTour } from "../onboarding/OnboardingTour";
 
 export default function Shell() {
   const status = useAppStore((s) => s.session.status);
   const { pathname } = useLocation();
+  const [showTour, setShowTour] = useState(() => shouldShowTour());
+
+  useEffect(() => {
+    function onDone() { setShowTour(false); }
+    window.addEventListener("onboarding-done", onDone);
+    return () => window.removeEventListener("onboarding-done", onDone);
+  }, []);
 
   return (
     <div className="flex h-screen overflow-hidden bg-surface">
@@ -35,6 +44,7 @@ export default function Shell() {
 
       {/* Modals / overlays */}
       {status === "configuring" && <ScanConfigModal />}
+      {showTour && <OnboardingTour />}
 
       {/* Background ambient glow */}
       <div className="fixed top-0 right-0 w-1/3 h-1/2 bg-primary/5 blur-[120px] rounded-full -z-10 pointer-events-none" />
