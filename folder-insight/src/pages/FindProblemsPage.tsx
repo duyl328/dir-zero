@@ -25,7 +25,7 @@ export default function FindProblemsPage() {
   const t = useT();
   const result = session.result;
   const [tab, setTab] = useState<Tab>("residue");
-  const [dupProgress, setDupProgress] = useState<{ processed: number; total: number } | null>(null);
+  const [dupProgress, setDupProgress] = useState<{ phase: string; processed: number; total: number } | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [deletedPaths, setDeletedPaths] = useState<Set<string>>(new Set());
   const { rules: customRules, addRule, removeRule, toggleEnabled } = useCustomResidueRules();
@@ -106,7 +106,7 @@ export default function FindProblemsPage() {
     setDuplicatesStatus("scanning");
     setDupProgress(null);
 
-    const unlisten = await listen<{ processed: number; total: number }>("dup-progress", (e) => {
+    const unlisten = await listen<{ phase: string; processed: number; total: number }>("dup-progress", (e) => {
       setDupProgress(e.payload);
     });
 

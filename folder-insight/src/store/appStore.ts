@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { create } from "zustand";
-import type { ScanSession, ScanStatus, ScanProgress, SlimScanResult, FileEntry, FileChunk, ExcludeRule, DuplicateCluster } from "../types";
+import type { ScanSession, ScanStatus, ScanProgress, SlimScanResult, SlimFolderEntry, FileEntry, FileChunk, ExcludeRule, DuplicateCluster } from "../types";
 import type { Locale } from "../i18n";
 
 type DupStatus = "idle" | "scanning" | "cancelling" | "done";
@@ -18,6 +18,10 @@ interface AppState {
   locale: Locale;
   theme: Theme;
 
+  // Partial tree emitted during scanning (live preview)
+  partialTree: SlimFolderEntry | null;
+  scanPartialProgress: { completed: number; total: number } | null;
+
   // Lazy-loaded flat file list (background chunk loading after scan)
   allFiles: FileEntry[] | null;
   filesLoading: boolean;
@@ -28,6 +32,7 @@ interface AppState {
   setScanStatus: (status: ScanStatus) => void;
   setScanProgress: (progress: ScanProgress) => void;
   setScanResult: (result: SlimScanResult) => void;
+  setPartialTree: (tree: SlimFolderEntry, progress?: { completed: number; total: number }) => void;
   resetSession: () => void;
   toggleExcludeRule: (id: string) => void;
   addExcludeRule: (rule: ExcludeRule) => void;
@@ -87,6 +92,8 @@ export const useAppStore = create<AppState>((set, _get) => {
   duplicatesStatus: "idle",
   locale: (localStorage.getItem("locale") as Locale | null) ?? "zh",
   theme: savedTheme,
+  partialTree: null,
+  scanPartialProgress: null,
   allFiles: null,
   filesLoading: false,
   filesTotal: 0,
@@ -109,6 +116,8 @@ export const useAppStore = create<AppState>((set, _get) => {
   setScanResult: (result) => {
     set((s) => ({
       session: { ...s.session, result, status: "done" },
+      partialTree: null,
+      scanPartialProgress: null,
       allFiles: null,
       filesLoading: true,
       filesTotal: result.fileCount,
@@ -125,6 +134,8 @@ export const useAppStore = create<AppState>((set, _get) => {
       session: { ...defaultSession, id: crypto.randomUUID() },
       duplicatesResult: null,
       duplicatesStatus: "idle",
+      partialTree: null,
+      scanPartialProgress: null,
       allFiles: null,
       filesLoading: false,
       filesTotal: 0,
@@ -148,6 +159,9 @@ export const useAppStore = create<AppState>((set, _get) => {
 
   setDuplicatesStatus: (status) =>
     set({ duplicatesStatus: status }),
+
+  setPartialTree: (tree, progress) =>
+    set({ partialTree: tree, ...(progress ? { scanPartialProgress: progress } : {}) }),
 
   setLocale: (locale) => {
     localStorage.setItem("locale", locale);

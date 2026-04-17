@@ -11,7 +11,7 @@ type KeepStrategy = "newest" | "oldest" | "manual";
 interface Props {
   clusters: DuplicateCluster[] | null;
   status: "idle" | "scanning" | "cancelling" | "done";
-  dupProgress: { processed: number; total: number } | null;
+  dupProgress: { phase: string; processed: number; total: number } | null;
   onScan: () => void;
   onCancel: () => void;
   onDeleted: (deletedPaths: Set<string>) => void;
@@ -64,6 +64,15 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan, o
     const pct = dupProgress && dupProgress.total > 0
       ? Math.round((dupProgress.processed / dupProgress.total) * 100)
       : 0;
+    const phaseLabel = status === "cancelling"
+      ? t.duplicates.cancelling
+      : dupProgress?.phase === "sizing"
+      ? t.duplicates.phaseSizing
+      : dupProgress?.phase === "quick_hash"
+      ? t.duplicates.phaseQuickHash
+      : dupProgress?.phase === "full_hash"
+      ? t.duplicates.phaseFullHash
+      : t.duplicates.hashing;
     return (
       <div className="flex flex-col items-center justify-center gap-4 py-20 text-center px-8">
         <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
@@ -72,10 +81,8 @@ export default function DuplicatesTab({ clusters, status, dupProgress, onScan, o
           </span>
         </div>
         <div>
-          <p className="text-sm font-bold text-on-surface mb-1">
-            {status === "cancelling" ? t.duplicates.cancelling : t.duplicates.hashing}
-          </p>
-          {dupProgress && status === "scanning" && (
+          <p className="text-sm font-bold text-on-surface mb-1">{phaseLabel}</p>
+          {dupProgress && dupProgress.total > 0 && status === "scanning" && (
             <p className="text-xs text-on-surface-variant">
               {dupProgress.processed.toLocaleString()} / {dupProgress.total.toLocaleString()} {t.duplicates.files}
             </p>

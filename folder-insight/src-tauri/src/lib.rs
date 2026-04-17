@@ -473,9 +473,94 @@ fn scan_dir_parallel(
         local_files.push(file);
     }
 
-    // Process subdirs: parallel for shallow levels, sequential for deep ones
-    let sub_results: Vec<(SlimFolderEntry, Vec<FileEntry>)> = if depth < PARALLEL_DEPTH_LIMIT {
-        dir_entries
+    // Process subdirs: parallel for shallow levels, sequential for deep ones.
+    // At depth=0 (root), use a channel so we can emit partial-tree events as
+    // each top-level directory finishes — the consumer thread runs concurrently
+    // with the rayon workers, giving the frontend live treemap updates.
+    let mut folder_folder_count: u64 = 0;
+    let mut slim_children: Vec<SlimFolderEntry> = Vec::new();
+
+    if depth == 0 {
+        let (tx, rx) = std::sync::mpsc::channel::<(SlimFolderEntry, Vec<FileEntry>)>();
+
+        // Consumer: receives completed subtrees and emits partial snapshots.
+        let app_clone = state.app.clone();
+        let root_path_str = dir_str.clone();
+        let root_name = name.clone();
+        let state_consumer = Arc::clone(state);
+        let seed_size = folder_size;
+        let seed_file_count = folder_file_count;
+        let total_top_level_dirs = dir_entries.len();
+
+        let consumer = std::thread::Builder::new()
+            .spawn(move || {
+                let mut results: Vec<(SlimFolderEntry, Vec<FileEntry>)> = Vec::new();
+                let mut acc_size = seed_size;
+                let mut acc_files = seed_file_count;
+                let mut acc_folders = 0u64;
+
+                for (sub_slim, sub_files) in rx {
+                    acc_size += sub_slim.size;
+                    acc_files += sub_slim.file_count;
+                    acc_folders += 1 + sub_slim.folder_count;
+                    results.push((sub_slim, sub_files));
+
+                    // Build a partial snapshot (children unsorted — frontend sorts by size)
+                    let partial = SlimFolderEntry {
+                        path: root_path_str.clone(),
+                        name: root_name.clone(),
+                        size: acc_size,
+                        file_count: acc_files,
+                        folder_count: acc_folders,
+                        children: results.iter().map(|(s, _)| s.clone()).collect(),
+                        depth: 0,
+                    };
+                    let _ = app_clone.emit("scan-partial", serde_json::json!({
+                        "tree": partial,
+                        "filesFound": state_consumer.files_found.load(Ordering::Relaxed),
+                        "totalSize": state_consumer.total_size.load(Ordering::Relaxed),
+                        "completedTopLevelDirs": results.len(),
+                        "totalTopLevelDirs": total_top_level_dirs,
+                    }));
+                }
+                results
+            })
+            .expect("consumer thread spawn failed");
+
+        // Producers: scan each top-level child in parallel, send result to consumer.
+        dir_entries.par_iter().for_each_with(tx, |tx, entry| {
+            let count = state.files_found.fetch_add(1, Ordering::Relaxed) + 1;
+            if count % 200 == 0 {
+                let elapsed = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0)
+                    .saturating_sub(state.start_ms);
+                let _ = state.app.emit(
+                    "scan-progress",
+                    ScanProgress {
+                        files_found: count,
+                        total_size: state.total_size.load(Ordering::Relaxed),
+                        current_path: entry.path().to_string_lossy().to_string(),
+                        elapsed_ms: elapsed,
+                        mode: "compat".to_string(),
+                    },
+                );
+            }
+            let result = scan_dir_parallel(&entry.path(), depth + 1, rules, state);
+            let _ = tx.send(result);
+        });
+        // All tx clones dropped here → consumer loop ends → join returns.
+
+        for (sub_slim, sub_files) in consumer.join().expect("consumer thread panicked") {
+            folder_size += sub_slim.size;
+            folder_file_count += sub_slim.file_count;
+            folder_folder_count += 1 + sub_slim.folder_count;
+            local_files.extend(sub_files);
+            slim_children.push(sub_slim);
+        }
+    } else if depth < PARALLEL_DEPTH_LIMIT {
+        let sub_results: Vec<(SlimFolderEntry, Vec<FileEntry>)> = dir_entries
             .par_iter()
             .map(|entry| {
                 let count = state.files_found.fetch_add(1, Ordering::Relaxed) + 1;
@@ -498,43 +583,41 @@ fn scan_dir_parallel(
                 }
                 scan_dir_parallel(&entry.path(), depth + 1, rules, state)
             })
-            .collect()
+            .collect();
+        for (sub_slim, sub_files) in sub_results {
+            folder_size += sub_slim.size;
+            folder_file_count += sub_slim.file_count;
+            folder_folder_count += 1 + sub_slim.folder_count;
+            local_files.extend(sub_files);
+            slim_children.push(sub_slim);
+        }
     } else {
-        dir_entries
-            .iter()
-            .map(|entry| {
-                let count = state.files_found.fetch_add(1, Ordering::Relaxed) + 1;
-                if count % 200 == 0 {
-                    let elapsed = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .map(|d| d.as_millis() as u64)
-                        .unwrap_or(0)
-                        .saturating_sub(state.start_ms);
-                    let _ = state.app.emit(
-                        "scan-progress",
-                        ScanProgress {
-                            files_found: count,
-                            total_size: state.total_size.load(Ordering::Relaxed),
-                            current_path: entry.path().to_string_lossy().to_string(),
-                            elapsed_ms: elapsed,
-                            mode: "compat".to_string(),
-                        },
-                    );
-                }
-                scan_dir_parallel(&entry.path(), depth + 1, rules, state)
-            })
-            .collect()
-    };
-
-    let mut folder_folder_count: u64 = 0;
-    let mut slim_children: Vec<SlimFolderEntry> = Vec::new();
-
-    for (sub_slim, sub_files) in sub_results {
-        folder_size += sub_slim.size;
-        folder_file_count += sub_slim.file_count;
-        folder_folder_count += 1 + sub_slim.folder_count;
-        local_files.extend(sub_files);
-        slim_children.push(sub_slim);
+        for entry in &dir_entries {
+            let count = state.files_found.fetch_add(1, Ordering::Relaxed) + 1;
+            if count % 200 == 0 {
+                let elapsed = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0)
+                    .saturating_sub(state.start_ms);
+                let _ = state.app.emit(
+                    "scan-progress",
+                    ScanProgress {
+                        files_found: count,
+                        total_size: state.total_size.load(Ordering::Relaxed),
+                        current_path: entry.path().to_string_lossy().to_string(),
+                        elapsed_ms: elapsed,
+                        mode: "compat".to_string(),
+                    },
+                );
+            }
+            let (sub_slim, sub_files) = scan_dir_parallel(&entry.path(), depth + 1, rules, state);
+            folder_size += sub_slim.size;
+            folder_file_count += sub_slim.file_count;
+            folder_folder_count += 1 + sub_slim.folder_count;
+            local_files.extend(sub_files);
+            slim_children.push(sub_slim);
+        }
     }
 
     // Sort slim children by size descending for treemap
@@ -650,7 +733,8 @@ async fn scan_folder(
                         depth: 0,
                     };
                     let mut all: Vec<FileEntry> = Vec::new();
-                    for root in &roots {
+                    let total_roots = roots.len();
+                    for (i, root) in roots.iter().enumerate() {
                         let root_path = std::path::PathBuf::from(root);
                         let (sub_slim, sub_files) =
                             scan_dir_parallel(&root_path, 1, &exclude_rules, &scan_state_clone);
@@ -659,6 +743,13 @@ async fn scan_folder(
                         virtual_slim.folder_count += 1 + sub_slim.folder_count;
                         virtual_slim.children.push(sub_slim);
                         all.extend(sub_files);
+                        let _ = scan_state_clone.app.emit("scan-partial", serde_json::json!({
+                            "tree": virtual_slim,
+                            "filesFound": scan_state_clone.files_found.load(Ordering::Relaxed),
+                            "totalSize": scan_state_clone.total_size.load(Ordering::Relaxed),
+                            "completedTopLevelDirs": i + 1,
+                            "totalTopLevelDirs": total_roots,
+                        }));
                     }
                     (virtual_slim, all)
                 };
@@ -752,14 +843,24 @@ async fn find_duplicates(
         .map(|f| f.path.clone())
         .collect();
 
-    // ── Phase 1: group by size (metadata only, very fast) ────────────────────
+    // ── Phase 1: group by size (metadata only) ───────────────────────────────
+    let total_paths = paths.len();
+    let _ = app.emit("dup-progress", serde_json::json!({
+        "phase": "sizing", "processed": 0, "total": total_paths
+    }));
+
     let mut size_groups: HashMap<u64, Vec<String>> = HashMap::new();
-    for path in &paths {
+    for (i, path) in paths.iter().enumerate() {
         if let Ok(meta) = std::fs::metadata(path) {
             let size = meta.len();
             if size > 0 {
                 size_groups.entry(size).or_default().push(path.clone());
             }
+        }
+        if (i + 1) % 5000 == 0 {
+            let _ = app.emit("dup-progress", serde_json::json!({
+                "phase": "sizing", "processed": i + 1, "total": total_paths
+            }));
         }
     }
 
@@ -776,7 +877,9 @@ async fn find_duplicates(
     let processed = Arc::new(AtomicUsize::new(0));
 
     // ── Phase 2: quick hash in parallel (first 64 KB per file) ───────────────
-    // Flatten all candidate paths with their sizes for parallel processing
+    let _ = app.emit("dup-progress", serde_json::json!({
+        "phase": "quick_hash", "processed": 0, "total": total_candidates
+    }));
     let flat: Vec<(u64, String)> = candidates
         .iter()
         .flat_map(|(size, paths)| paths.iter().map(move |p| (*size, p.clone())))
@@ -792,7 +895,7 @@ async fn find_duplicates(
             let done = processed_ref.fetch_add(1, Ordering::Relaxed) + 1;
             if done % 200 == 0 {
                 let _ = app_ref.emit("dup-progress", serde_json::json!({
-                    "processed": done, "total": total_candidates * 2
+                    "phase": "quick_hash", "processed": done, "total": total_candidates
                 }));
             }
             Some((*size, path.clone(), h))
@@ -817,6 +920,12 @@ async fn find_duplicates(
         .flat_map(|(size, paths)| paths.iter().map(move |p| (*size, p.clone())))
         .collect();
 
+    let full_total = full_flat.len();
+    processed.store(0, Ordering::Relaxed);
+    let _ = app.emit("dup-progress", serde_json::json!({
+        "phase": "full_hash", "processed": 0, "total": full_total
+    }));
+
     let full_results: Vec<(u64, String, String)> = full_flat
         .par_iter()
         .filter_map(|(size, path)| {
@@ -824,7 +933,7 @@ async fn find_duplicates(
             let done = processed_ref.fetch_add(1, Ordering::Relaxed) + 1;
             if done % 50 == 0 {
                 let _ = app_ref.emit("dup-progress", serde_json::json!({
-                    "processed": done, "total": total_candidates * 2
+                    "phase": "full_hash", "processed": done, "total": full_total
                 }));
             }
             Some((*size, path.clone(), h))
@@ -858,7 +967,7 @@ async fn find_duplicates(
 
     clusters.sort_by(|a, b| b.reclaimable.cmp(&a.reclaimable));
     let _ = app.emit("dup-progress", serde_json::json!({
-        "processed": total_candidates * 2, "total": total_candidates * 2
+        "phase": "full_hash", "processed": full_total, "total": full_total
     }));
     Ok(clusters)
 }

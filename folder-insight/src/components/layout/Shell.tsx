@@ -1,7 +1,6 @@
 import { useLocation } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import ScanConfigModal from "../scan/ScanConfigModal";
-import ScanProgressOverlay from "../scan/ScanProgressOverlay";
 import { useAppStore } from "../../store/appStore";
 import OverviewPage from "../../pages/OverviewPage";
 import FindProblemsPage from "../../pages/FindProblemsPage";
@@ -36,7 +35,6 @@ export default function Shell() {
 
       {/* Modals / overlays */}
       {status === "configuring" && <ScanConfigModal />}
-      {status === "scanning" && <ScanProgressOverlay />}
 
       {/* Background ambient glow */}
       <div className="fixed top-0 right-0 w-1/3 h-1/2 bg-primary/5 blur-[120px] rounded-full -z-10 pointer-events-none" />

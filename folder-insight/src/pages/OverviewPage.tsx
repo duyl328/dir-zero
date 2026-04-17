@@ -74,7 +74,7 @@ const TYPE_META: Record<string, { label: string; color: string }> = {
 };
 
 export default function OverviewPage() {
-  const { session, setScanStatus } = useAppStore();
+  const { session, setScanStatus, partialTree, scanPartialProgress } = useAppStore();
   // Keep allFiles in a ref — don't subscribe reactively to avoid re-renders during chunk loading
   const allFilesRef = useRef<import("../types").FileEntry[] | null>(null);
   useEffect(() => {
@@ -84,6 +84,9 @@ export default function OverviewPage() {
   }, []);
   const filesLoading = useAppStore((s) => s.filesLoading);
   const result = session.result;
+  const isScanning = session.status === "scanning";
+  // During scanning use the live partial tree; after done use the final result tree
+  const displayTree = result?.tree ?? partialTree;
   const [colorMode, setColorMode] = useState<ColorMode>("type");
   const [selected, setSelected] = useState<FolderChild | null>(null);
   const [leftWidth, setLeftWidth] = useState(224);
@@ -105,9 +108,18 @@ export default function OverviewPage() {
   }, []);
 
   // Treemap drill-down stack — lifted here so tree and treemap stay in sync
-  const [treemapStack, setTreemapStack] = useState<SlimFolderEntry[]>(result ? [result.tree] : []);
+  const [treemapStack, setTreemapStack] = useState<SlimFolderEntry[]>(displayTree ? [displayTree] : []);
 
-  // Reset when scan result changes
+  // Reset stack when a new scan starts (partialTree goes from null → first partial)
+  // or when the final result arrives
+  useEffect(() => {
+    if (displayTree && treemapStack.length === 0) {
+      setTreemapStack([displayTree]);
+      setSelected(null);
+    }
+  }, [displayTree]);
+
+  // When final result arrives, reset to root
   useEffect(() => {
     if (result) {
       setTreemapStack([result.tree]);
@@ -136,10 +148,10 @@ export default function OverviewPage() {
   function handleResultSelect(file: FileEntry | null) {
     if (!file) { setSelected(null); return; }
     setSelected({ kind: "file", ...file });
-    if (!result) return;
+    if (!displayTree) return;
     const sep = file.path.includes("\\") ? "\\" : "/";
     const parentPath = file.path.substring(0, file.path.lastIndexOf(sep));
-    const path = findPathToFolder(result.tree, parentPath);
+    const path = findPathToFolder(displayTree, parentPath);
     if (path) setTreemapStack(path);
   }
 
@@ -174,14 +186,14 @@ export default function OverviewPage() {
   // Called when user clicks a node in the directory tree
   function handleTreeSelect(child: FolderChild) {
     setSelected(child);
-    if (child.kind === "folder" && result) {
-      const path = findPathToFolder(result.tree, child.path);
+    if (child.kind === "folder" && displayTree) {
+      const path = findPathToFolder(displayTree, child.path);
       if (path) setTreemapStack(path);
     }
   }
 
-  // 空状态：尚未扫描
-  if (!result) {
+  // 空状态：尚未扫描且没有部分数据
+  if (!displayTree && !isScanning) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center px-8 py-24 select-none">
         <div className="w-24 h-24 rounded-3xl bg-primary/10 flex items-center justify-center mb-8 shadow-inner">
@@ -204,15 +216,93 @@ export default function OverviewPage() {
     );
   }
 
+  // 扫描中但还没有任何部分数据
+  if (!displayTree && isScanning) {
+    const progress = session.progress;
+    const pct = scanPartialProgress && scanPartialProgress.total > 0
+      ? Math.round((scanPartialProgress.completed / scanPartialProgress.total) * 100)
+      : null;
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-center px-8 py-24 select-none">
+        <div className="relative w-20 h-20 mb-8">
+          <div className="absolute inset-0 rounded-full border-4 border-primary/20" />
+          <div className="absolute inset-0 rounded-full border-4 border-primary border-t-transparent animate-spin" />
+          <div className="absolute inset-0 flex items-center justify-center">
+            <span className="material-symbols-outlined text-primary text-[28px]">radar</span>
+          </div>
+        </div>
+        <p className="font-headline text-lg font-extrabold text-on-surface mb-1">正在扫描…</p>
+        <p className="text-sm text-on-surface-variant mb-4">{session.roots.join(", ")}</p>
+        {progress && (
+          <p className="text-xs text-on-surface-variant/60 mb-4">
+            {progress.filesFound.toLocaleString()} 个文件 · {(progress.totalSize / 1e9).toFixed(1)} GB
+          </p>
+        )}
+        <div className="w-64 h-1.5 bg-primary/15 rounded-full overflow-hidden">
+          {pct !== null ? (
+            <div
+              className="h-full bg-primary rounded-full transition-all duration-500"
+              style={{ width: `${pct}%` }}
+            />
+          ) : (
+            <div className="h-full w-1/3 bg-primary/60 rounded-full animate-pulse" />
+          )}
+        </div>
+        {pct !== null && (
+          <p className="text-xs font-bold text-primary mt-2">{pct}%</p>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
+      {/* Scanning progress banner — shown while scan is in progress */}
+      {isScanning && (() => {
+        const progress = session.progress;
+        const filesFound = progress?.filesFound ?? 0;
+        const pct = scanPartialProgress && scanPartialProgress.total > 0
+          ? Math.round((scanPartialProgress.completed / scanPartialProgress.total) * 100)
+          : null;
+        return (
+          <div className="px-4 pt-2 pb-1.5 bg-primary/8 border-b border-primary/15 flex flex-col gap-1.5 shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-3.5 h-3.5 rounded-full border-2 border-primary border-t-transparent animate-spin shrink-0" />
+              <span className="text-xs font-bold text-primary">扫描中…</span>
+              <span className="text-xs text-on-surface-variant">
+                {filesFound.toLocaleString()} 个文件
+                {progress ? ` · ${(progress.totalSize / 1e9).toFixed(1)} GB` : ""}
+              </span>
+              {pct !== null && (
+                <span className="text-xs font-bold text-primary/80 ml-1">{pct}%</span>
+              )}
+              {progress?.currentPath && (
+                <span className="text-[10px] font-mono text-on-surface-variant/50 truncate flex-1 min-w-0">
+                  {progress.currentPath}
+                </span>
+              )}
+            </div>
+            <div className="h-1 bg-primary/15 rounded-full overflow-hidden">
+              {pct !== null ? (
+                <div
+                  className="h-full bg-primary rounded-full transition-all duration-500"
+                  style={{ width: `${pct}%` }}
+                />
+              ) : (
+                <div className="h-full w-1/3 bg-primary/60 rounded-full animate-pulse" />
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Stats + search bar */}
       <div className="px-4 py-2.5 bg-surface-container-low border-b border-outline-variant/10 flex items-center gap-2 shrink-0">
         {/* Stats group */}
         <div className="flex items-center gap-1 shrink-0">
-          <StatCard icon="hard_drive" label="总大小" value={formatBytes(result.totalSize)} />
-          <StatCard icon="insert_drive_file" label="文件" value={result.fileCount.toLocaleString()} />
-          <StatCard icon="folder" label="文件夹" value={result.folderCount.toLocaleString()} />
+          <StatCard icon="hard_drive" label="总大小" value={result ? formatBytes(result.totalSize) : formatBytes(displayTree?.size ?? 0)} />
+          <StatCard icon="insert_drive_file" label="文件" value={result ? result.fileCount.toLocaleString() : (displayTree?.fileCount ?? 0).toLocaleString()} />
+          <StatCard icon="folder" label="文件夹" value={result ? result.folderCount.toLocaleString() : (displayTree?.folderCount ?? 0).toLocaleString()} />
         </div>
 
         <div className="w-px h-8 bg-outline-variant/20 mx-1 shrink-0" />
@@ -226,7 +316,7 @@ export default function OverviewPage() {
 
         <div className="flex-1" />
 
-        {result.issueCount > 0 && (
+        {result && result.issueCount > 0 && (
           <div className="flex items-center gap-1.5 px-2.5 py-1 bg-error/10 rounded-full shrink-0">
             <span className="material-symbols-outlined text-error text-[15px]">warning</span>
             <span className="text-xs font-bold text-error">{result.issueCount} issues</span>
@@ -234,14 +324,16 @@ export default function OverviewPage() {
         )}
 
         {/* Rescan */}
-        <button
-          onClick={() => setScanStatus("configuring")}
-          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant hover:text-primary transition-all text-xs font-bold shrink-0"
-          title="重新扫描"
-        >
-          <span className="material-symbols-outlined text-[15px]">refresh</span>
-          重新扫描
-        </button>
+        {!isScanning && (
+          <button
+            onClick={() => setScanStatus("configuring")}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant hover:text-primary transition-all text-xs font-bold shrink-0"
+            title="重新扫描"
+          >
+            <span className="material-symbols-outlined text-[15px]">refresh</span>
+            重新扫描
+          </button>
+        )}
 
         {/* Color mode toggle — hidden during search */}
         {!searchActive && (
@@ -269,11 +361,11 @@ export default function OverviewPage() {
         {/* Left: directory tree */}
         <div style={{ width: leftWidth }} className="shrink-0 overflow-y-auto bg-surface-container-low/40">
           <DirectoryTree
-            root={result.tree}
+            root={displayTree!}
             onSelect={handleTreeSelect}
             selected={selected}
             currentFolderPath={treemapStack[treemapStack.length - 1]?.path}
-            onNavigateToRoot={() => { setTreemapStack([result.tree]); setSelected(null); }}
+            onNavigateToRoot={() => { setTreemapStack([displayTree!]); setSelected(null); }}
             matchedPaths={matchedPaths}
           />
         </div>
@@ -323,14 +415,14 @@ export default function OverviewPage() {
                 </div>
               )}
               <TreemapCanvas
-                root={result.tree}
+                root={displayTree!}
                 colorMode={colorMode}
                 selected={selected}
                 onSelect={setSelected}
                 stack={treemapStack}
                 onStackChange={setTreemapStack}
               />
-              <TypeBar stats={typeStats} unknownExts={unknownExtStats} />
+              {result && <TypeBar stats={typeStats} unknownExts={unknownExtStats} />}
             </>
           )}
         </div>
@@ -338,12 +430,14 @@ export default function OverviewPage() {
         {/* Right: detail + insight */}
         <div className="w-72 shrink-0 border-l border-outline-variant/10 flex flex-col overflow-hidden">
           <DetailPanel node={selected} />
-          <InsightPanel
-            topFiles={result.stats.topFiles}
-            oldFilesCount={result.stats.oldFilesCount}
-            oldFilesSize={result.stats.oldFilesSize}
-            totalSize={result.totalSize}
-          />
+          {result && (
+            <InsightPanel
+              topFiles={result.stats.topFiles}
+              oldFilesCount={result.stats.oldFilesCount}
+              oldFilesSize={result.stats.oldFilesSize}
+              totalSize={result.totalSize}
+            />
+          )}
         </div>
       </div>
     </div>

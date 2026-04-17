@@ -4,10 +4,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useAppStore } from "../../store/appStore";
 import { useT } from "../../hooks/useT";
-import type { SlimScanResult, ScanProgress } from "../../types";
+import type { SlimScanResult, ScanProgress, SlimFolderEntry } from "../../types";
 
 export default function ScanConfigModal() {
-  const { session, setScanRoots, setScanStatus, setScanProgress, setScanResult, excludeRules, toggleExcludeRule, resetSession } = useAppStore();
+  const { session, setScanRoots, setScanStatus, setScanProgress, setScanResult, setPartialTree, excludeRules, toggleExcludeRule, resetSession } = useAppStore();
   const t = useT();
   const [roots, setRoots] = useState<string[]>(session.roots);
 
@@ -30,12 +30,23 @@ export default function ScanConfigModal() {
   async function handleStartScan() {
     if (roots.length === 0) return;
     setScanRoots(roots);
-    setScanStatus("scanning");
+    setScanStatus("scanning"); // closes this modal, OverviewPage shows immediately
 
-    // Listen for progress events from Rust
-    const unlisten = await listen<ScanProgress>("scan-progress", (event) => {
+    const unlistenProgress = await listen<ScanProgress>("scan-progress", (event) => {
       setScanProgress(event.payload);
     });
+    const unlistenPartial = await listen<{ tree: SlimFolderEntry; filesFound: number; totalSize: number; completedTopLevelDirs?: number; totalTopLevelDirs?: number }>(
+      "scan-partial",
+      (event) => {
+        const { tree, completedTopLevelDirs, totalTopLevelDirs } = event.payload;
+        setPartialTree(
+          tree,
+          completedTopLevelDirs !== undefined && totalTopLevelDirs !== undefined
+            ? { completed: completedTopLevelDirs, total: totalTopLevelDirs }
+            : undefined,
+        );
+      },
+    );
 
     try {
       const result = await invoke<SlimScanResult>("scan_folder", {
@@ -47,7 +58,8 @@ export default function ScanConfigModal() {
       console.error("Scan failed:", err);
       setScanStatus("idle");
     } finally {
-      unlisten();
+      unlistenProgress();
+      unlistenPartial();
     }
   }
 
