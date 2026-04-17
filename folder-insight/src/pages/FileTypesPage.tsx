@@ -90,14 +90,19 @@ function buildExtBreakdown(files: FileEntry[], noExtLabel: string): ExtRow[] {
   return [...map.entries()].map(([ext, { size, count }]) => ({ ext, size, count })).sort((a, b) => b.size - a.size);
 }
 
-interface TypeGroup { category: FileTypeCategory; totalSize: number; count: number; files: FileEntry[] }
-interface AgeGroup  { label: string; color: string; totalSize: number; count: number; files: FileEntry[] }
+interface TypeGroup { category: FileTypeCategory; totalSize: number; count: number; files: FileEntry[]; filesTotal: number }
+interface AgeGroup  { label: string; color: string; totalSize: number; count: number; files: FileEntry[]; filesTotal: number }
+
+const FILES_PREVIEW = 200;
 
 function buildTypeGroups(files: FileEntry[]): TypeGroup[] {
   const map = new Map<FileTypeCategory, FileEntry[]>();
   for (const f of files) { const arr = map.get(f.fileType) ?? []; arr.push(f); map.set(f.fileType, arr); }
   return [...map.entries()]
-    .map(([category, fs]) => ({ category, totalSize: fs.reduce((s, f) => s + f.size, 0), count: fs.length, files: [...fs].sort((a, b) => b.size - a.size) }))
+    .map(([category, fs]) => {
+      const sorted = [...fs].sort((a, b) => b.size - a.size);
+      return { category, totalSize: fs.reduce((s, f) => s + f.size, 0), count: fs.length, files: sorted.slice(0, FILES_PREVIEW), filesTotal: fs.length };
+    })
     .sort((a, b) => b.totalSize - a.totalSize);
 }
 
@@ -109,7 +114,11 @@ function buildAgeGroups(files: FileEntry[], ageBuckets: ReturnType<typeof getAge
     bucket.totalSize += f.size; bucket.count += 1; bucket.files.push(f);
   }
   for (const b of buckets) b.files.sort((a, c) => c.size - a.size);
-  return buckets.filter((b) => b.count > 0).map(({ label, color, totalSize, count, files }) => ({ label, color, totalSize, count, files }));
+  return buckets.filter((b) => b.count > 0).map(({ label, color, totalSize, count, files }) => ({
+    label, color, totalSize, count,
+    files: files.slice(0, FILES_PREVIEW),
+    filesTotal: files.length,
+  }));
 }
 
 // ── ExtBreakdown ─────────────────────────────────────────────────────────────
@@ -145,7 +154,7 @@ function ExtBreakdown({ files, color, noExtLabel }: { files: FileEntry[]; color:
 
 // ── FileList ─────────────────────────────────────────────────────────────────
 
-function FileList({ files, selected, onToggle, limit = 8 }: { files: FileEntry[]; selected: Set<string>; onToggle: (p: string) => void; limit?: number }) {
+function FileList({ files, selected, onToggle, limit = 8, filesTotal }: { files: FileEntry[]; selected: Set<string>; onToggle: (p: string) => void; limit?: number; filesTotal?: number }) {
   const t = useT();
   const [showAll, setShowAll] = useState(false);
   const visible = showAll ? files : files.slice(0, limit);
@@ -178,6 +187,11 @@ function FileList({ files, selected, onToggle, limit = 8 }: { files: FileEntry[]
         <button onClick={() => setShowAll((v) => !v)} className="mt-1.5 text-[10px] font-bold text-primary hover:underline">
           {showAll ? t.fileTypes.collapse : t.fileTypes.viewAll(files.length)}
         </button>
+      )}
+      {filesTotal !== undefined && filesTotal > files.length && (
+        <p className="mt-1.5 text-[10px] text-on-surface-variant/40">
+          {t.fileTypes.fileListTruncated(files.length, filesTotal)}
+        </p>
       )}
     </div>
   );
@@ -253,7 +267,7 @@ function TypeCard({ group, totalSize, selected, selState, onToggle, onToggleAll 
                 {allSel ? t.fileTypes.deselectAll : t.fileTypes.selectAll}
               </button>
             </div>
-            <FileList files={group.files} selected={selected} onToggle={onToggle} />
+            <FileList files={group.files} selected={selected} onToggle={onToggle} filesTotal={group.filesTotal} />
           </div>
         </div>
       )}
@@ -308,7 +322,7 @@ function AgeCard({ group, totalSize, selected, onToggle, onToggleAll }: {
               {allSel ? t.fileTypes.deselectAll : t.fileTypes.selectAll}
             </button>
           </div>
-          <FileList files={group.files} selected={selected} onToggle={onToggle} />
+          <FileList files={group.files} selected={selected} onToggle={onToggle} filesTotal={group.filesTotal} />
         </div>
       )}
     </div>

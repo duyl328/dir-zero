@@ -193,6 +193,7 @@ export const zh = {  // Sidebar
     collapse: "收起",
     moreExts: (n: number) => `+${n} 种扩展名`,
     viewAll: (n: number) => `查看全部 ${n.toLocaleString()} 个文件`,
+    fileListTruncated: (shown: number, total: number) => `仅显示最大的 ${shown.toLocaleString()} 个文件，共 ${total.toLocaleString()} 个`,
     noExt: "(无扩展名)",
     revealInExplorer: "在文件管理器中打开",
     deselectAll: "取消全选",

@@ -187,6 +187,7 @@ export const en: Translations = {
     collapse: "Collapse",
     moreExts: (n: number) => `+${n} more extensions`,
     viewAll: (n: number) => `View all ${n.toLocaleString()} files`,
+    fileListTruncated: (shown: number, total: number) => `Showing largest ${shown.toLocaleString()} of ${total.toLocaleString()} files`,
     noExt: "(no ext)",
     revealInExplorer: "Reveal in Explorer",
     deselectAll: "Deselect all",

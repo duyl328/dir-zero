@@ -79,6 +79,7 @@ function placeStrip(strip: TreeChild[], sz: number, x: number, y: number, w: num
 
 const EXPAND_HEADER = 22; // px — height of expanded folder's title strip
 const PAD = 3;
+const MIN_RECT_PX = 4; // skip rects smaller than this in either dimension
 
 function computeAllRects(
   children: TreeChild[],
@@ -90,6 +91,7 @@ function computeAllRects(
   const top = squarify(children, x, y, w, h);
   const all: DrawRect[] = [];
   for (const r of top) {
+    if (r.w < MIN_RECT_PX || r.h < MIN_RECT_PX) continue;
     all.push({ ...r, depth });
     if (r.child.kind === "folder" && expanded.has(r.child.path) && r.child.children.length > 0) {
       const sx = r.x + PAD, sy = r.y + EXPAND_HEADER;
@@ -186,10 +188,24 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath();
 }
 
+// ── Canvas setup helper ───────────────────────────────────────────────────────
+
+function setupCanvas(canvas: HTMLCanvasElement, w: number, h: number): CanvasRenderingContext2D {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.width = `${w}px`;
+  canvas.style.height = `${h}px`;
+  const ctx = canvas.getContext("2d")!;
+  ctx.scale(dpr, dpr);
+  return ctx;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function TreemapCanvas({ root, colorMode, selected, onSelect, stack, onStackChange }: Props) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const baseCanvasRef = useRef<HTMLCanvasElement>(null);
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState<number | null>(null);
   const [dims, setDims] = useState({ w: 0, h: 0 });
@@ -200,7 +216,7 @@ export default function TreemapCanvas({ root, colorMode, selected, onSelect, sta
   // Cache of lazy-loaded file leaves per folder path
   const fileCacheRef = useRef<Map<string, FileEntry[]>>(new Map());
 
-  // Text measurement cache — cleared each draw to stay in sync with font/dpr changes
+  // Text measurement cache — cleared when dims change (font/dpr may have changed)
   const measureCacheRef = useRef<Map<string, number>>(new Map());
 
   // RAF throttle refs for mousemove hit-testing
@@ -271,36 +287,32 @@ export default function TreemapCanvas({ root, colorMode, selected, onSelect, sta
   const allRectsRef = useRef(allRects);
   allRectsRef.current = allRects;
 
+  // Clear text measurement cache when canvas dimensions change
+  useEffect(() => {
+    measureCacheRef.current.clear();
+  }, [dims]);
+
   // ── Draw ──────────────────────────────────────────────────────────────────
 
+  // Base layer: static treemap backgrounds + labels. Only redraws when layout or colors change.
   useEffect(() => {
-    const canvas = canvasRef.current;
+    const canvas = baseCanvasRef.current;
     if (!canvas || dims.w === 0 || dims.h === 0) return;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = dims.w * dpr; canvas.height = dims.h * dpr;
-    canvas.style.width = `${dims.w}px`; canvas.style.height = `${dims.h}px`;
-    const ctx = canvas.getContext("2d")!;
-    ctx.scale(dpr, dpr);
+    const ctx = setupCanvas(canvas, dims.w, dims.h);
     ctx.clearRect(0, 0, dims.w, dims.h);
-
-    // Clear text measurement cache — font/dpr may have changed
-    measureCacheRef.current.clear();
     const mc = measureCacheRef.current;
 
     // Draw in depth order so sub-rects appear on top of their parents
     const sorted = [...allRects].sort((a, b) => a.depth - b.depth);
 
-    // Pass 1: backgrounds + labels
     for (const { x, y, w, h, child, depth } of sorted) {
       if (w < 2 || h < 2) continue;
       const color = nodeColor(child, colorMode);
-      const isHov = hovered !== null && allRects[hovered]?.child.path === child.path;
-      const isSel = selected?.path === child.path;
       const isExp = child.kind === "folder" && expandedPaths.has(child.path);
 
       ctx.save();
       roundRect(ctx, x + PAD, y + PAD, w - PAD * 2, h - PAD * 2, 4 - depth);
-      ctx.fillStyle = color + (isSel ? "ee" : isHov ? "cc" : depth > 0 ? "99" : "88");
+      ctx.fillStyle = color + (depth > 0 ? "99" : "88");
       ctx.fill();
 
       if (isExp && child.kind === "folder") {
@@ -365,22 +377,35 @@ export default function TreemapCanvas({ root, colorMode, selected, onSelect, sta
       }
       ctx.restore();
     }
+  }, [dims, allRects, colorMode, expandedPaths]);
 
-    // Pass 2: borders (hover / selected — always on top)
-    for (const { x, y, w, h, child } of sorted) {
+  // Overlay layer: hover + selection highlights only. Redraws only on hover/selection change.
+  useEffect(() => {
+    const canvas = overlayCanvasRef.current;
+    if (!canvas || dims.w === 0 || dims.h === 0) return;
+    const ctx = setupCanvas(canvas, dims.w, dims.h);
+    ctx.clearRect(0, 0, dims.w, dims.h);
+    if (hovered === null && selected === null) return;
+
+    for (const { x, y, w, h, child } of allRects) {
       if (w < 2 || h < 2) continue;
       const isHov = hovered !== null && allRects[hovered]?.child.path === child.path;
       const isSel = selected?.path === child.path;
       if (!isHov && !isSel) continue;
       const color = nodeColor(child, colorMode);
       ctx.save();
+      // Semi-transparent fill to visually darken the hovered/selected node
+      roundRect(ctx, x + PAD, y + PAD, w - PAD * 2, h - PAD * 2, 4);
+      ctx.fillStyle = isSel ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.10)";
+      ctx.fill();
+      // Border on top
       roundRect(ctx, x + PAD, y + PAD, w - PAD * 2, h - PAD * 2, 4);
       ctx.strokeStyle = isSel ? "#ffffff" : color;
       ctx.lineWidth = isSel ? 2 : 1.5;
       ctx.stroke();
       ctx.restore();
     }
-  }, [dims, hovered, selected, colorMode, allRects, expandedPaths]);
+  }, [dims, allRects, hovered, selected, colorMode]);
 
   // ── Hit testing ───────────────────────────────────────────────────────────
 
@@ -401,7 +426,7 @@ export default function TreemapCanvas({ root, colorMode, selected, onSelect, sta
   // ── Event handlers ────────────────────────────────────────────────────────
 
   function handleMouseMove(e: React.MouseEvent<HTMLCanvasElement>) {
-    const r = canvasRef.current!.getBoundingClientRect();
+    const r = overlayCanvasRef.current!.getBoundingClientRect();
     mousePosRef.current = { x: e.clientX - r.left, y: e.clientY - r.top };
     if (rafPendingRef.current) return;
     rafPendingRef.current = true;
@@ -413,7 +438,7 @@ export default function TreemapCanvas({ root, colorMode, selected, onSelect, sta
   }
 
   function handleClick(e: React.MouseEvent<HTMLCanvasElement>) {
-    const r = canvasRef.current!.getBoundingClientRect();
+    const r = overlayCanvasRef.current!.getBoundingClientRect();
     const idx = getDeepestAt(e.clientX - r.left, e.clientY - r.top);
     if (idx === null) { onSelect(null); return; }
     const child = allRectsRef.current[idx].child;
@@ -433,7 +458,7 @@ export default function TreemapCanvas({ root, colorMode, selected, onSelect, sta
   }
 
   function handleDoubleClick(e: React.MouseEvent<HTMLCanvasElement>) {
-    const r = canvasRef.current!.getBoundingClientRect();
+    const r = overlayCanvasRef.current!.getBoundingClientRect();
     const idx = getDeepestAt(e.clientX - r.left, e.clientY - r.top);
     if (idx === null) return;
     const child = allRectsRef.current[idx].child;
@@ -449,7 +474,7 @@ export default function TreemapCanvas({ root, colorMode, selected, onSelect, sta
 
   function handleContextMenu(e: React.MouseEvent<HTMLCanvasElement>) {
     e.preventDefault();
-    const r = canvasRef.current!.getBoundingClientRect();
+    const r = overlayCanvasRef.current!.getBoundingClientRect();
     const idx = getDeepestAt(e.clientX - r.left, e.clientY - r.top);
     if (idx === null) return;
     setContextMenu({ x: e.clientX, y: e.clientY, child: allRectsRef.current[idx].child });
@@ -483,9 +508,17 @@ export default function TreemapCanvas({ root, colorMode, selected, onSelect, sta
         </div>
       )}
 
+      {/* Base layer: static treemap (no pointer events) */}
       <canvas
-        ref={canvasRef}
-        className="w-full h-full cursor-pointer"
+        ref={baseCanvasRef}
+        className="absolute inset-0 w-full h-full"
+        style={{ pointerEvents: "none" }}
+      />
+
+      {/* Overlay layer: hover + selection highlights, receives all mouse events */}
+      <canvas
+        ref={overlayCanvasRef}
+        className="absolute inset-0 w-full h-full cursor-pointer"
         onMouseMove={handleMouseMove}
         onMouseLeave={() => setHovered(null)}
         onClick={handleClick}

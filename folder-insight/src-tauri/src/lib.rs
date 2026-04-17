@@ -628,33 +628,46 @@ async fn scan_folder(
     });
 
     let scan_state_clone = Arc::clone(&scan_state);
+    // Spawn on a thread with a large stack — the recursive scan_dir_parallel can
+    // go hundreds of levels deep (node_modules, WinSxS …) and overflows the
+    // default ~1 MB Windows stack.  64 MB gives plenty of headroom.
     let (slim_tree, all_files) = tauri::async_runtime::spawn_blocking(move || {
-        if roots.len() == 1 {
-            let root_path = std::path::PathBuf::from(&roots[0]);
-            scan_dir_parallel(&root_path, 0, &exclude_rules, &scan_state_clone)
-        } else {
-            let mut virtual_slim = SlimFolderEntry {
-                path: roots.join(", "),
-                name: "Selected Folders".to_string(),
-                size: 0,
-                file_count: 0,
-                folder_count: 0,
-                children: Vec::new(),
-                depth: 0,
-            };
-            let mut all: Vec<FileEntry> = Vec::new();
-            for root in &roots {
-                let root_path = std::path::PathBuf::from(root);
-                let (sub_slim, sub_files) =
-                    scan_dir_parallel(&root_path, 1, &exclude_rules, &scan_state_clone);
-                virtual_slim.size += sub_slim.size;
-                virtual_slim.file_count += sub_slim.file_count;
-                virtual_slim.folder_count += 1 + sub_slim.folder_count;
-                virtual_slim.children.push(sub_slim);
-                all.extend(sub_files);
-            }
-            (virtual_slim, all)
-        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || {
+                let result = if roots.len() == 1 {
+                    let root_path = std::path::PathBuf::from(&roots[0]);
+                    scan_dir_parallel(&root_path, 0, &exclude_rules, &scan_state_clone)
+                } else {
+                    let mut virtual_slim = SlimFolderEntry {
+                        path: roots.join(", "),
+                        name: "Selected Folders".to_string(),
+                        size: 0,
+                        file_count: 0,
+                        folder_count: 0,
+                        children: Vec::new(),
+                        depth: 0,
+                    };
+                    let mut all: Vec<FileEntry> = Vec::new();
+                    for root in &roots {
+                        let root_path = std::path::PathBuf::from(root);
+                        let (sub_slim, sub_files) =
+                            scan_dir_parallel(&root_path, 1, &exclude_rules, &scan_state_clone);
+                        virtual_slim.size += sub_slim.size;
+                        virtual_slim.file_count += sub_slim.file_count;
+                        virtual_slim.folder_count += 1 + sub_slim.folder_count;
+                        virtual_slim.children.push(sub_slim);
+                        all.extend(sub_files);
+                    }
+                    (virtual_slim, all)
+                };
+                let _ = tx.send(result);
+            })
+            .expect("failed to spawn scan thread")
+            .join()
+            .expect("scan thread panicked");
+        rx.recv().expect("scan result channel closed")
     })
     .await
     .map_err(|e| e.to_string())?;
